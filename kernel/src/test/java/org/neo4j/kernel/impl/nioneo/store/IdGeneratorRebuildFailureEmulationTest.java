@@ -19,6 +19,7 @@
  */
 package org.neo4j.kernel.impl.nioneo.store;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -55,7 +56,7 @@ import static org.neo4j.kernel.CommonFactories.defaultIdGeneratorFactory;
 
 @RunWith( Suite.class )
 @SuiteClasses( { IdGeneratorRebuildFailureEmulationTest.FailureBeforeRebuild.class,
-                IdGeneratorRebuildFailureEmulationTest.FailureDuringRebuild.class } )
+                 IdGeneratorRebuildFailureEmulationTest.FailureDuringRebuild.class } )
 public class IdGeneratorRebuildFailureEmulationTest
 {
     @RunWith( JUnit4.class )
@@ -106,13 +107,13 @@ public class IdGeneratorRebuildFailureEmulationTest
     @BreakpointTrigger
     private void performTest() throws Exception
     {
-        String file = prefix + "/" + Thread.currentThread().getStackTrace()[2].getMethodName().replace( '_', '.' );
+        String file = prefix + File.separator + Thread.currentThread().getStackTrace()[2].getMethodName().replace( '_', '.' );
         // emulate the need for rebuilding id generators by deleting it
         fs.deleteFile( file + ".id" );
         NeoStore neostore = null;
         try
         {
-            neostore = factory.newNeoStore( prefix + "/neostore" );
+            neostore = factory.newNeoStore( prefix + File.separator + "neostore" );
             // emulate a failure during rebuild:
             emulateFailureOnRebuildOf( neostore );
         }
@@ -151,9 +152,8 @@ public class IdGeneratorRebuildFailureEmulationTest
     }
 
     @After
-    public void verifyAndDispose()
+    public void verifyAndDispose() throws Exception
     {
-        //System.out.println(fs.releaseAllLocks());
         try
         {
             AbstractGraphDatabase graphdb = new Database();
@@ -162,7 +162,7 @@ public class IdGeneratorRebuildFailureEmulationTest
         }
         finally
         {
-            if ( fs != null ) fs.dispose();
+            if ( fs != null ) fs.disposeAndAssertNoOpenFiles();
             fs = null;
         }
     }
@@ -230,8 +230,11 @@ public class IdGeneratorRebuildFailureEmulationTest
 
     private static class FileSystem extends EphemeralFileSystemAbstraction
     {
-        void dispose()
+        void disposeAndAssertNoOpenFiles() throws Exception
         {
+            //Collection<String> open = openFiles();
+            //assertTrue( "Open files: " + open, open.isEmpty() );
+            assertNoOpenFiles();
             super.shutdown();
         }
 
