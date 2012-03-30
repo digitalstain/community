@@ -35,6 +35,7 @@ public class NullLogBuffer implements LogBuffer
     @Override public LogBuffer putFloat( float f ) throws IOException { return this; }
     @Override public LogBuffer putDouble( double d ) throws IOException { return this; }
     @Override public LogBuffer put( byte[] bytes ) throws IOException { return this; }
+    @Override public LogBuffer put( byte[] bytes, int length ) throws IOException { return this; }
     @Override public LogBuffer put( char[] chars ) throws IOException { return this; }
     @Override public void writeOut() throws IOException {}
     @Override public void force() throws IOException {}

@@ -38,6 +38,8 @@ public interface LogBuffer
 
     public LogBuffer put( byte[] bytes ) throws IOException;
 
+    public LogBuffer put( byte[] bytes, int count ) throws IOException;
+
     public LogBuffer put( char[] chars ) throws IOException;
 
     /**
@@ -53,7 +55,7 @@ public interface LogBuffer
      * Makes sure the data added to this buffer is written out to the underlying
      * file and forced. Same guarantees as writeOut() plus actually being
      * written to disk.
-     * 
+     *
      * @throws IOException if the data couldn't be written.
      */
     public void force() throws IOException;

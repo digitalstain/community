@@ -30,19 +30,19 @@ public class InMemoryLogBuffer implements LogBuffer, ReadableByteChannel
     private int writeIndex;
     private int readIndex;
     private ByteBuffer bufferForConversions = ByteBuffer.wrap( new byte[100] );
-    
+
     public InMemoryLogBuffer()
     {
     }
-    
+
     public void reset()
     {
         writeIndex = readIndex = 0;
     }
-    
+
     private void ensureArrayCapacityPlus( int plus )
     {
-        while ( writeIndex+plus > bytes.length ) 
+        while ( writeIndex+plus > bytes.length )
         {
             byte[] tmp = bytes;
             bytes = new byte[bytes.length*2];
@@ -58,7 +58,7 @@ public class InMemoryLogBuffer implements LogBuffer, ReadableByteChannel
         writeIndex += bufferForConversions.limit();
         return this;
     }
-    
+
     public LogBuffer put( byte b ) throws IOException
     {
         ensureArrayCapacityPlus( 1 );
@@ -71,7 +71,7 @@ public class InMemoryLogBuffer implements LogBuffer, ReadableByteChannel
         ((ByteBuffer) bufferForConversions.clear()).putShort( s );
         return flipAndPut();
     }
-    
+
     public LogBuffer putInt( int i ) throws IOException
     {
         ((ByteBuffer) bufferForConversions.clear()).putInt( i );
@@ -89,14 +89,19 @@ public class InMemoryLogBuffer implements LogBuffer, ReadableByteChannel
         ((ByteBuffer) bufferForConversions.clear()).putFloat( f );
         return flipAndPut();
     }
-    
+
     public LogBuffer putDouble( double d ) throws IOException
     {
         ((ByteBuffer) bufferForConversions.clear()).putDouble( d );
         return flipAndPut();
     }
-    
+
     public LogBuffer put( byte[] bytes ) throws IOException
+    {
+        return put( bytes, bytes.length );
+    }
+
+    public LogBuffer put( byte[] bytes, int length ) throws IOException
     {
         ensureArrayCapacityPlus( bytes.length );
         System.arraycopy( bytes, 0, this.bytes, writeIndex, bytes.length );
@@ -122,7 +127,7 @@ public class InMemoryLogBuffer implements LogBuffer, ReadableByteChannel
             bufferForConversions = ByteBuffer.wrap( new byte[length*2] );
         }
     }
-    
+
     @Override
     public void writeOut() throws IOException
     {
@@ -157,7 +162,7 @@ public class InMemoryLogBuffer implements LogBuffer, ReadableByteChannel
         {
             return -1;
         }
-        
+
         int actualLengthToRead = Math.min( dst.limit(), writeIndex-readIndex );
         try
         {

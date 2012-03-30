@@ -103,13 +103,18 @@ public class DirectMappedLogBuffer implements LogBuffer
 
     public LogBuffer put( byte[] bytes ) throws IOException
     {
-        put( bytes, 0 );
+        return put( bytes, bytes.length );
+    }
+
+    public LogBuffer put (byte[] bytes, int length) throws IOException
+    {
+        put( bytes, 0, length );
         return this;
     }
 
-    private void put( byte[] bytes, int offset ) throws IOException
+    private void put( byte[] bytes, int offset, int length ) throws IOException
     {
-        int bytesToWrite = bytes.length - offset;
+        int bytesToWrite = length - offset;
         if ( bytesToWrite > BUFFER_SIZE )
         {
             bytesToWrite = BUFFER_SIZE;

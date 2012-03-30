@@ -55,7 +55,7 @@ class DirectLogBuffer implements LogBuffer
         buffer.putShort( s );
         return flipAndWrite();
     }
-    
+
     public LogBuffer putInt( int i ) throws IOException
     {
         buffer.clear();
@@ -76,24 +76,29 @@ class DirectLogBuffer implements LogBuffer
         buffer.putFloat( f );
         return flipAndWrite();
     }
-    
+
     public LogBuffer putDouble( double d ) throws IOException
     {
         buffer.clear();
         buffer.putDouble( d );
         return flipAndWrite();
     }
-    
+
     private LogBuffer flipAndWrite() throws IOException
     {
         buffer.flip();
         fileChannel.write( buffer );
         return this;
     }
-    
+
     public LogBuffer put( byte[] bytes ) throws IOException
     {
-        fileChannel.write( ByteBuffer.wrap( bytes ) );
+        return put( bytes, bytes.length );
+    }
+
+    public LogBuffer put( byte[] bytes, int count ) throws IOException
+    {
+        fileChannel.write( ByteBuffer.wrap( bytes, 0, count ) );
         return this;
     }
 
@@ -122,7 +127,7 @@ class DirectLogBuffer implements LogBuffer
         } while ( position < chars.length );
         return this;
     }
-    
+
     @Override
     public void writeOut() throws IOException
     {
