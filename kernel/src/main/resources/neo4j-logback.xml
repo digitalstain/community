@@ -19,21 +19,13 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 -->
-
 <configuration>
-
-  <logger name="neo4j.diagnostics" level="DEBUG" />
-
   <appender name="FILE" class="ch.qos.logback.core.FileAppender">
     <file>${neo_store}/messages.log</file>
     <encoder>
       <pattern>%date{ISO8601} %-5level [%c]: %message%n</pattern>
     </encoder>
   </appender>
-
-  <root level="INFO">
-    <appender-ref ref="FILE" />
-  </root>
 
   <if condition='property("remote_logging_enabled").contains("true")'>
       <then>
@@ -43,11 +35,20 @@
             <reconnectionDelay>10000</reconnectionDelay>
             <includeCallerData>true</includeCallerData>
         </appender>
-        <root>
+        <logger name="neo4j">
           <appender-ref ref="SOCKET" />
-        </root>
+        </logger>
       </then>
   </if>
 
+  <logger name="neo4j.diagnostics" level="DEBUG">
+  </logger>
+
+  <logger name="neo4j" additivity="false">
+    <appender-ref ref="FILE" />
+  </logger>
+
+  <root level="INFO">
+  </root>
 
 </configuration>
