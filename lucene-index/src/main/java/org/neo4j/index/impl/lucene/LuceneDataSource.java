@@ -150,8 +150,8 @@ public class LuceneDataSource extends LogBackedXaDataSource
 
     public static final Analyzer KEYWORD_ANALYZER = new KeywordAnalyzer();
 
-    private final IndexWriterLruCache indexWriters;
-    private final IndexSearcherLruCache indexSearchers;
+    private final IndexWriterClockCache indexWriters;
+    private final IndexSearcherClockCache indexSearchers;
 
     private final XaContainer xaContainer;
     private final String baseStorePath;
@@ -176,8 +176,8 @@ public class LuceneDataSource extends LogBackedXaDataSource
     public LuceneDataSource( Config config,  IndexStore indexStore, FileSystemAbstraction fileSystemAbstraction, XaFactory xaFactory)
     {
         super( DEFAULT_BRANCH_ID, DEFAULT_NAME );
-        indexSearchers = new IndexSearcherLruCache( config.getInteger( Configuration.lucene_searcher_cache_size ));
-        indexWriters = new IndexWriterLruCache( config.getInteger( Configuration.lucene_writer_cache_size ));
+        indexSearchers = new IndexSearcherClockCache( config.getInteger( Configuration.lucene_searcher_cache_size ) );
+        indexWriters = new IndexWriterClockCache( config.getInteger( Configuration.lucene_writer_cache_size ) );
         caching = new Cache();
         String storeDir = config.get( Configuration.store_dir );
         this.baseStorePath = getStoreDir( storeDir ).first();
@@ -541,10 +541,9 @@ public class LuceneDataSource extends LogBackedXaDataSource
             if ( searcher.other().compareAndSet( true, false ) )
             {
                 /*
-                 * could be indexSearchers but
-                 * the following call locks this either way
+                 * could be synchronized on indexSearchers too but
+                 * the following call locks LuceneDataSource.this either way
                  */
-                synchronized ( this )
                 {
                     IndexWriter writer = getIndexWriter( identifier );
                     searcher = refreshSearcher( searcher, writer );
@@ -647,7 +646,22 @@ public class LuceneDataSource extends LogBackedXaDataSource
         }
     }
 
-    synchronized IndexWriter getIndexWriter( IndexIdentifier identifier )
+    IndexWriter getIndexWriter( IndexIdentifier identifier )
+    {
+        if ( closed ) throw new IllegalStateException( "Index has been shut down" );
+
+        IndexWriter writer = indexWriters.get( identifier );
+        if ( writer != null )
+        {
+            return writer;
+        }
+        else
+        {
+            return synchGetIndexWriter( identifier );
+        }
+    }
+
+    private synchronized IndexWriter synchGetIndexWriter( IndexIdentifier identifier )
     {
         if ( closed ) throw new IllegalStateException( "Index has been shut down" );
 
