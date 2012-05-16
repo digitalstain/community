@@ -38,7 +38,6 @@ public class ClockCache<K, V>
     private final int maxSize;
     private final AtomicInteger currentSize = new AtomicInteger( 0 );
     private final String name;
-    private static final AtomicInteger foo = new AtomicInteger( 0 );
 
     public ClockCache( String name, int size )
     {
@@ -67,39 +66,27 @@ public class ClockCache<K, V>
         Page<V> theValue = cache.get( key );
         if ( theValue == null )
         {
-//            synchronized ( this )
+            theValue = new Page<V>();
+            if ( cache.putIfAbsent( key, theValue ) == null )
             {
-                theValue = new Page<V>();
-                if ( cache.putIfAbsent( key, theValue ) == null )
-                {
-                    clock.offer( theValue );
-                    System.out.println( "Size is " + foo.incrementAndGet() );
-                }
-                else
-                {
-                    System.out.println( "Ouch, for key " + key );
-                }
+                clock.offer( theValue );
+            }
+            else
+            {
+                System.out.println( "Ouch, for key " + key );
             }
         }
-        V myValue = null;
-        while ( !theValue.value.compareAndSet( myValue, value ) )
-        {
-            // System.out.println( "impressive: " + myValue + " vs " +
-            // theValue.value.get() );
-            myValue = theValue.value.get();
-        }
+        V myValue = theValue.value.get();
+        theValue.flag.set( true );
+        theValue.value.set( value );
         if ( myValue == null )
         {
-//            synchronized ( this )
+            if ( currentSize.incrementAndGet() > maxSize )
             {
-                if ( currentSize.incrementAndGet() > maxSize )
-                {
-                    evict();
-                }
-                assert currentSize.get() <= maxSize : "put: " + currentSize.get();
+                evict();
             }
+            assert currentSize.get() <= maxSize : "put: " + currentSize.get();
         }
-        theValue.flag.set( true );
     }
 
     public V get( K key )
@@ -117,113 +104,39 @@ public class ClockCache<K, V>
         theElement.flag.set( true );
         if ( theValue == null )
         {
-            System.out.println( "hey, candy!" );
             theElement.flag.set( false );
         }
         return theValue;
     }
 
-    private void checkSize()
-    {
-        while ( currentSize.get() > maxSize )
-        {
-            evict();
-        }
-    }
-
     private void evict()
     {
-        if ( currentSize.get() > maxSize + 1 )
+        Page<V> theElement = null;
+        while ( ( theElement = clock.poll() ) != null && currentSize.get() > maxSize )
         {
-            System.out.println( Thread.currentThread().getName() + " getting to evict, count is " + currentSize.get() );
-        }
-        int countBefore = 0;
-        for ( Page<V> page : clock )
-        {
-            // System.out.println( "\t" + page );
-            countBefore++;
-        }
-        Page<V> theElement = null;/*clock.peek();
-                                  if ( theElement == null )
-                                  {
-                                  System.out.println( "wanted to evict but queue was empty: " + currentSize.get() );
-                                  return;
-                                  }
-                                  int pageStartedAt = theElement.instanceNumber;
-                                  clock.offer( clock.poll() );*/
-        int maxMet = -1;
-        while ( ( theElement = clock.poll() ) != null && currentSize.get() > maxSize /*&& theElement.instanceNumber != pageStartedAt*/)
-        {
-            if ( maxMet < theElement.instanceNumber )
-            {
-                maxMet = theElement.instanceNumber;
-                // System.out.println( "just met " + maxMet );
-            }
             if ( !theElement.flag.compareAndSet( true, false ) )
             {
-                int myCurrentSize = currentSize.get();
-                assert !theElement.flag.get();
                 V valueCleaned = theElement.value.get();
                 if ( valueCleaned == null)
                 {
-                    // System.out.println( "was already gone" );
                     theElement.flag.set( false );
                 }
-                else if ( !theElement.value.compareAndSet( valueCleaned, null ) )
+                else if ( theElement.value.compareAndSet( valueCleaned, null ) )
                 {
-                    System.out.println( "missed a chance" );
-                    // clock.offer( theElement );
-                }
-                else
-                {
-                    assert theElement.value.get() == null;
-                    // Page<V> fromQueue = findValueInClock(
-                    // theElement.instanceNumber );
-                    // assert fromQueue != null : "for instance number " +
-                    // theElement.instanceNumber;
-                    // assert !fromQueue.flag.get();
-                    // assert fromQueue.value.get() == null;
                     elementCleaned( valueCleaned );
-                    int myCurrentSizeNow = currentSize.get();
-                    assert myCurrentSize == myCurrentSizeNow : myCurrentSize + " vs " + myCurrentSizeNow;
                     currentSize.decrementAndGet();
-                    myCurrentSizeNow = currentSize.get();
-                    assert myCurrentSizeNow == myCurrentSize - 1 : myCurrentSize + " vs " + myCurrentSizeNow + " 2";
-                    // System.out.println( "I am " +
-                    // Thread.currentThread().getName() + " and my count is "
-                    // + myCurrentSizeNow );
-                    // return;
-                    // clock.offer( theElement );
                 }
             }
-            if ( !clock.offer( theElement ) )
-            {
-                System.out.println( "What the hell?" );
-            }
+            clock.offer( theElement );
         }
         if ( theElement != null )
         {
             clock.offer( theElement );
         }
-        assert currentSize.get() <= maxSize : "evict: " + currentSize.get();
-        // System.out.println( Thread.currentThread().getName() +
-        // " done evicting, count is " + currentSize.get() );
-        int countAfter = 0;
-        for ( Page<V> page : clock )
-        {
-            // System.out.println( "\t" + page );
-            countAfter++;
-        }
-        if ( countBefore != countAfter )
-        {
-            System.out.println( "Hey, wrong count, " + countBefore + " vs " + countAfter );
-            System.exit( 0 );
-        }
     }
 
     protected void elementCleaned( V element )
     {
-        // System.out.println( "Cleared " + element );
     }
 
     public Set<K> keySet()
@@ -251,31 +164,12 @@ public class ClockCache<K, V>
         for ( K key : cache.keySet() )
         {
             Page<V> value = cache.get( key );
-            // Page<V> fromQueue = findValueInClock( value.instanceNumber );
             if ( value.value.get() != null )
             {
-                // assert fromQueue.instanceNumber == value.instanceNumber;
-                // assert fromQueue != null : "Got null from queue for " +
-                // value.instanceNumber;
-                // assert value == fromQueue;
-                // assert value.value.get().equals( fromQueue.value.get() );
                 temp.put( key, value.value.get() );
                 counter++;
-                // if ( counter > maxSize )
-                // {
-                // System.out.println( "Trouble in paradise: " );
-                // for ( Page<V> page : clock )
-                // {
-                // System.out.println( "\t" + page );
-                // }
-                // }
             }
         }
-        // System.out.println( "Trouble in paradise: " );
-        // for ( Page<V> page : clock )
-        // {
-        // System.out.println( "\t" + page );
-        // }
         return temp.entrySet();
     }
 
@@ -294,18 +188,6 @@ public class ClockCache<K, V>
         toRemove.value.compareAndSet( toReturn, null );
         toRemove.flag.set( false );
         return toReturn;
-    }
-
-    private Page<V> findValueInClock( int instanceNumber )
-    {
-        for ( Page<V> page : cache.values() )
-        {
-            if ( page.instanceNumber == instanceNumber )
-            {
-                return page;
-            }
-        }
-        return null;
     }
 
     public String getName()
@@ -327,10 +209,8 @@ public class ClockCache<K, V>
 
     private static class Page<E>
     {
-        private static final AtomicInteger instanceCounter = new AtomicInteger( 0 );
         final AtomicBoolean flag = new AtomicBoolean( true );
         final AtomicReference<E> value = new AtomicReference<E>();
-        final int instanceNumber = instanceCounter.incrementAndGet();
 
         @Override
         public boolean equals( Object obj )
@@ -360,8 +240,7 @@ public class ClockCache<K, V>
         @Override
         public String toString()
         {
-            return ( value.get() != null ? "->" : "" ) + "[Page: " + instanceNumber + ", flag: " + flag + ", value: "
-                   + value.get() + "]";
+            return ( value.get() != null ? "->" : "" ) + "[Flag: " + flag + ", value: " + value.get() + "]";
         }
     }
 }

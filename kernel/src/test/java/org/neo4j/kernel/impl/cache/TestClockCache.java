@@ -41,7 +41,6 @@ import org.junit.Test;
 public class TestClockCache
 {
     @Test
-    @Ignore
     public void testCreate()
     {
         try
@@ -112,7 +111,6 @@ public class TestClockCache
     }
 
     @Test
-    @Ignore
     public void testSimple()
     {
         ClockCacheTest<Integer, String> cache = new ClockCacheTest<Integer, String>(
@@ -205,8 +203,10 @@ public class TestClockCache
         assertEquals( "2", cache.get( 2 ) );
         assertEquals( "3", cache.get( 3 ) );
         assertEquals( "1", cache.getLastCleanedElement() );
+        cache.put( 1, "1-1" );
+        assertEquals( "3", cache.getLastCleanedElement() );
+        assertEquals( "1-1", cache.get( 1 ) );
         cache.put( 1, "1" );
-        assertEquals( "2", cache.getLastCleanedElement() );
 
         int entryCounter = 0;
         for ( Map.Entry<Integer, String> entry : cache.entrySet() )
@@ -219,8 +219,10 @@ public class TestClockCache
     }
 
     @Test
+    @Ignore( "Takes a lot of time and the cache is non hard on guarantees. Run by hand instead" )
     public void testMultiThreaded() throws InterruptedException
     {
+        final int cacheSize = 10;
         Map<String, Long> theControl = new ConcurrentHashMap<String, Long>();
         for ( int i = 0; i < 100; i++ )
         {
@@ -240,7 +242,7 @@ public class TestClockCache
         {
             System.out.println( "waiting more" );
         }
-        // assertEquals( 10, theCache.size() );
+        assertEquals( cacheSize, theCache.size() );
         long now = System.currentTimeMillis();
         int entryCounter = 0;
         for ( Map.Entry<String, String> entry : theCache.entrySet() )
@@ -251,14 +253,14 @@ public class TestClockCache
             assertEquals( "wrong value for key " + entry.getKey(), entry.getKey() + "-value", entry.getValue() );
             entryCounter++;
         }
-        // assertEquals( "Entry counting was wrong", theCache.size(),
-        // entryCounter );
+        assertEquals( "Entry counting was wrong", theCache.size(), entryCounter );
+        /*
         for ( Map.Entry<String, Long> entry : theControl.entrySet() )
         {
-            // System.out.println( "Entry " + entry.getKey() +
-            // " is in control, " + ( now - entry.getValue() )
-            // + " since last messed with" );
+            System.out.println( "Entry " + entry.getKey() + " is in control, " + ( now - entry.getValue() )
+                                + " since last messed with" );
         }
+        */
     }
 
     private static class ClockCacheWorker implements Runnable
