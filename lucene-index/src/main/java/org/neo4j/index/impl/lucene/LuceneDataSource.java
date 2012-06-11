@@ -534,16 +534,17 @@ public class LuceneDataSource extends LogBackedXaDataSource
         Pair<IndexSearcherRef, AtomicBoolean> searcher = indexSearchers.get( identifier );
         if ( searcher == null )
         {
-            searcher = synchGetIndexSearcher( identifier, incRef );
+            searcher = synchGetIndexSearcher( identifier, false );
         }
         else
         {
-            if ( searcher.other().compareAndSet( true, false ) )
+            synchronized ( searcher )
             {
-                /*
-                 * could be synchronized on indexSearchers too but
-                 * the following call locks LuceneDataSource.this either way
-                 */
+                if ( searcher.first().isClosed() )
+                {
+                    searcher = synchGetIndexSearcher( identifier, false );
+                }
+                else if ( searcher.other().get() /*stale*/)
                 {
                     IndexWriter writer = getIndexWriter( identifier );
                     searcher = refreshSearcher( searcher, writer );
@@ -564,6 +565,10 @@ public class LuceneDataSource extends LogBackedXaDataSource
     private synchronized Pair<IndexSearcherRef, AtomicBoolean> synchGetIndexSearcher( IndexIdentifier identifier,
             boolean incRef )
     {
+        /*
+         *  Has to happen under global lock, ClockCache#put() is not thread safe and we need to make sure
+         *  that each index is opened once, otherwise stuff will leak.
+         */
         try
         {
             Pair<IndexSearcherRef, AtomicBoolean> searcher = indexSearchers.get( identifier );
