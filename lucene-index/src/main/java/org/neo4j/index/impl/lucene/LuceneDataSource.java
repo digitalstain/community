@@ -34,7 +34,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.KeywordAnalyzer;
@@ -155,7 +154,6 @@ public class LuceneDataSource extends LogBackedXaDataSource
 
     private final XaContainer xaContainer;
     private final String baseStorePath;
-    private ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     final IndexStore indexStore;
     final IndexProviderStore providerStore;
     private final IndexTypeCache typeCache;
@@ -434,30 +432,10 @@ public class LuceneDataSource extends LogBackedXaDataSource
         }
     }
 
-    void getReadLock()
-    {
-        lock.readLock().lock();
-    }
-
     @SuppressWarnings( "rawtypes" )
     private synchronized Map.Entry[] getAllIndexWriters()
     {
         return indexWriters.entrySet().toArray( new Map.Entry[indexWriters.size()] );
-    }
-
-    void releaseReadLock()
-    {
-        lock.readLock().unlock();
-    }
-
-    void getWriteLock()
-    {
-        lock.writeLock().lock();
-    }
-
-    void releaseWriteLock()
-    {
-        lock.writeLock().unlock();
     }
 
     /**
