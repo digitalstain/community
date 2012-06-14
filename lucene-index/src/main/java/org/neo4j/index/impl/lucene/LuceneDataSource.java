@@ -521,7 +521,6 @@ public class LuceneDataSource extends LogBackedXaDataSource
                 if ( searcher.first().isClosed() )
                 {
                     searcher = synchGetIndexSearcher( identifier, false );
-                    System.out.println( "------> Was closed dude, had to re-open" );
                 }
                 else if ( searcher.other().get() /*stale*/)
                 {
