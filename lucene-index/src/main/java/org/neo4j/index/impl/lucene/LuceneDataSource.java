@@ -33,7 +33,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.KeywordAnalyzer;
@@ -297,11 +296,11 @@ public class LuceneDataSource extends LogBackedXaDataSource
                 return;
             }
             closed = true;
-            for ( Pair<IndexSearcherRef, AtomicBoolean> searcher : indexSearchers.values() )
+            for ( IndexSearcherRef searcher : indexSearchers.values() )
             {
                 try
                 {
-                    searcher.first().dispose();
+                    searcher.dispose();
                 }
                 catch ( IOException e )
                 {
@@ -451,17 +450,18 @@ public class LuceneDataSource extends LogBackedXaDataSource
      * {@code null}.
      * @throws IOException if there's a problem with the index.
      */
-    private Pair<IndexSearcherRef, AtomicBoolean> refreshSearcher( Pair<IndexSearcherRef, AtomicBoolean> searcher, IndexWriter writer )
+    private IndexSearcherRef refreshSearcher( IndexSearcherRef searcher, IndexWriter writer )
     {
         try
         {
-            IndexReader reader = searcher.first().getSearcher().getIndexReader();
+            IndexReader reader = searcher.getSearcher().getIndexReader();
             IndexReader reopened = IndexReader.openIfChanged( reader, writer, true );
             if ( reopened != null )
             {
                 IndexSearcher newSearcher = new IndexSearcher( reopened );
-                searcher.first().detachOrClose();
-                return Pair.of( new IndexSearcherRef( searcher.first().getIdentifier(), newSearcher ), new AtomicBoolean() );
+                IndexSearcherRef newSearcherRef = new IndexSearcherRef( searcher.getIdentifier(), newSearcher );
+                indexSearchers.put( searcher.getIdentifier(), newSearcherRef );
+                searcher.detachOrClose();
             }
             return searcher;
         }
@@ -509,7 +509,7 @@ public class LuceneDataSource extends LogBackedXaDataSource
 
     IndexSearcherRef getIndexSearcher( IndexIdentifier identifier, boolean incRef )
     {
-        Pair<IndexSearcherRef, AtomicBoolean> searcher = indexSearchers.get( identifier );
+        IndexSearcherRef searcher = indexSearchers.get( identifier );
         if ( searcher == null )
         {
             searcher = synchGetIndexSearcher( identifier, true );
@@ -518,30 +518,25 @@ public class LuceneDataSource extends LogBackedXaDataSource
         {
             synchronized ( searcher )
             {
-                if ( searcher.first().isClosed() )
+                if ( searcher.isClosed() )
                 {
                     searcher = synchGetIndexSearcher( identifier, false );
                 }
-                else if ( searcher.other().get() /*stale*/)
+                else if ( searcher.checkAndClearStale() )
                 {
                     IndexWriter writer = getIndexWriter( identifier );
                     searcher = refreshSearcher( searcher, writer );
-                    if ( searcher != null )
-                    {
-                        indexSearchers.put( identifier, searcher );
-                    }
                 }
                 if ( incRef )
                 {
-                    searcher.first().incRef();
+                    searcher.incRef();
                 }
             }
         }
-        return searcher.first();
+        return searcher;
     }
 
-    private synchronized Pair<IndexSearcherRef, AtomicBoolean> synchGetIndexSearcher( IndexIdentifier identifier,
-            boolean incRef )
+    private synchronized IndexSearcherRef synchGetIndexSearcher( IndexIdentifier identifier, boolean incRef )
     {
         /*
          *  Has to happen under global lock, ClockCache#put() is not thread safe and we need to make sure
@@ -549,30 +544,21 @@ public class LuceneDataSource extends LogBackedXaDataSource
          */
         try
         {
-            Pair<IndexSearcherRef, AtomicBoolean> searcher = indexSearchers.get( identifier );
+            IndexSearcherRef searcher = indexSearchers.get( identifier );
             IndexWriter writer = getIndexWriter( identifier );
             if ( searcher == null )
             {
                 IndexReader reader = IndexReader.open( writer, true );
                 IndexSearcher indexSearcher = new IndexSearcher( reader );
-                searcher = Pair.of( new IndexSearcherRef( identifier, indexSearcher ), new AtomicBoolean() );
-                indexSearchers.put( identifier, searcher );
+                searcher = new IndexSearcherRef( identifier, indexSearcher );
             }
             else
             {
-                if ( searcher.other().compareAndSet( true, false ) )
-                {
+                if ( searcher.checkAndClearStale() )
                     searcher = refreshSearcher( searcher, writer );
-                    if ( searcher != null )
-                    {
-                        indexSearchers.put( identifier, searcher );
-                    }
-                }
             }
             if ( incRef )
-            {
-                searcher.first().incRef();
-            }
+                searcher.incRef();
             return searcher;
         }
         catch ( IOException e )
@@ -589,11 +575,9 @@ public class LuceneDataSource extends LogBackedXaDataSource
 
     synchronized void invalidateIndexSearcher( IndexIdentifier identifier )
     {
-        Pair<IndexSearcherRef, AtomicBoolean> searcher = indexSearchers.get( identifier );
+        IndexSearcherRef searcher = indexSearchers.get( identifier );
         if ( searcher != null )
-        {
-            searcher.other().set( true );
-        }
+            searcher.markAsStale();
     }
 
     void deleteIndex( IndexIdentifier identifier, boolean recovery )
@@ -746,11 +730,11 @@ public class LuceneDataSource extends LogBackedXaDataSource
     {
         try
         {
-            Pair<IndexSearcherRef, AtomicBoolean> searcher = indexSearchers.remove( identifier );
+            IndexSearcherRef searcher = indexSearchers.remove( identifier );
             IndexWriter writer = indexWriters.remove( identifier );
             if ( searcher != null )
             {
-                searcher.first().dispose();
+                searcher.dispose();
             }
             if ( writer != null )
             {

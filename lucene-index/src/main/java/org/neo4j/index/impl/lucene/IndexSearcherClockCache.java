@@ -20,12 +20,10 @@
 package org.neo4j.index.impl.lucene;
 
 import java.io.IOException;
-import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.neo4j.helpers.Pair;
 import org.neo4j.kernel.impl.cache.ClockCache;
 
-public class IndexSearcherClockCache extends ClockCache<IndexIdentifier, Pair<IndexSearcherRef, AtomicBoolean>>
+public class IndexSearcherClockCache extends ClockCache<IndexIdentifier, IndexSearcherRef>
 {
     public IndexSearcherClockCache( int maxSize )
     {
@@ -33,11 +31,14 @@ public class IndexSearcherClockCache extends ClockCache<IndexIdentifier, Pair<In
     }
 
     @Override
-    public void elementCleaned(Pair<IndexSearcherRef, AtomicBoolean> searcher)
+    public void elementCleaned( IndexSearcherRef searcher )
     {
-        try {
-            searcher.first().dispose();
-        } catch (IOException e) {
+        try
+        {
+            searcher.dispose();
+        }
+        catch ( IOException e )
+        {
             throw new RuntimeException( e );
         }
     }
