@@ -33,7 +33,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.apache.lucene.analysis.Analyzer;
@@ -150,8 +149,8 @@ public class LuceneDataSource extends LogBackedXaDataSource
 
     public static final Analyzer KEYWORD_ANALYZER = new KeywordAnalyzer();
 
-    private final IndexWriterLruCache indexWriters;
-    private final Map<IndexIdentifier, IndexSearcherRef> indexSearchers;
+    private final IndexWriterClockCache indexWriters;
+    private final IndexSearcherClockCache indexSearchers;
 
     private final XaContainer xaContainer;
     private final String baseStorePath;
@@ -176,8 +175,8 @@ public class LuceneDataSource extends LogBackedXaDataSource
     public LuceneDataSource( Config config,  IndexStore indexStore, FileSystemAbstraction fileSystemAbstraction, XaFactory xaFactory)
     {
         super( DEFAULT_BRANCH_ID, DEFAULT_NAME );
-        indexWriters = new IndexWriterLruCache( config.getInteger( Configuration.lucene_writer_cache_size ));
-        indexSearchers = new ConcurrentHashMap<IndexIdentifier, IndexSearcherRef>();
+        indexWriters = new IndexWriterClockCache( config.getInteger( Configuration.lucene_writer_cache_size ) );
+        indexSearchers = new IndexSearcherClockCache( config.getInteger( Configuration.lucene_searcher_cache_size ) );
         caching = new Cache();
         String storeDir = config.get( Configuration.store_dir );
         this.baseStorePath = getStoreDir( storeDir ).first();
@@ -434,15 +433,16 @@ public class LuceneDataSource extends LogBackedXaDataSource
         }
     }
 
-    void getReadLock()
-    {
-        lock.readLock().lock();
-    }
 
     @SuppressWarnings( "rawtypes" )
     private synchronized Map.Entry[] getAllIndexWriters()
     {
         return indexWriters.entrySet().toArray( new Map.Entry[indexWriters.size()] );
+    }
+
+    void getReadLock()
+    {
+        lock.readLock().lock();
     }
 
     void releaseReadLock()
@@ -532,19 +532,36 @@ public class LuceneDataSource extends LogBackedXaDataSource
         return TopFieldCollector.create( sorting, n, false, true, false, true );
     }
 
-    IndexSearcherRef getIndexSearcher( IndexIdentifier identifier, boolean incRef )
+    IndexSearcherRef getIndexSearcher( IndexIdentifier identifier )
     {
         IndexSearcherRef searcher = indexSearchers.get( identifier );
         if ( searcher == null )
         {
-            return syncGetIndexSearcher( identifier, incRef );
+            return syncGetIndexSearcher( identifier );
+        }
+        /*
+         * So, we increase the reference count first. After we check if it is closed. If no,
+         * then we can return, since no one will close it because we just updated the reference
+         * count and things are synchronized, hence properly ordered. If it is closed then we
+         *  have to synchronize.
+         */
+        searcher.incRef();
+        if ( !searcher.isClosed() && !searcher.isStale() )
+        {
+            // TODO can we get rid of the global lock when just stale?
+            return searcher;
         }
         synchronized ( searcher )
         {
+            /*
+             * We need to get again a reference to the searcher because it might be so that
+             * it was refreshed while we waited. Once in here though no one will mess with
+             * our searcher
+             */
             searcher = indexSearchers.get( identifier );
-            if ( searcher.isClosed() )
+            if ( searcher == null || searcher.isClosed() )
             {
-                return syncGetIndexSearcher( identifier, incRef );
+                return syncGetIndexSearcher( identifier );
             }
             if ( searcher.isStale() )
             {
@@ -555,15 +572,12 @@ public class LuceneDataSource extends LogBackedXaDataSource
                     indexSearchers.put( identifier, searcher );
                 }
             }
-            if ( incRef )
-            {
-                searcher.incRef();
-            }
+            searcher.incRef();
             return searcher;
         }
     }
 
-    synchronized IndexSearcherRef syncGetIndexSearcher( IndexIdentifier identifier, boolean incRef )
+    synchronized IndexSearcherRef syncGetIndexSearcher( IndexIdentifier identifier )
     {
         try
         {
@@ -590,10 +604,7 @@ public class LuceneDataSource extends LogBackedXaDataSource
                     }
                 }
             }
-            if ( incRef )
-            {
-                searcher.incRef();
-            }
+            searcher.incRef();
             return searcher;
         }
         catch ( IOException e )
