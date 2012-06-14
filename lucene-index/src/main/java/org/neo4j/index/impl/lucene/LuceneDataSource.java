@@ -512,7 +512,7 @@ public class LuceneDataSource extends LogBackedXaDataSource
         Pair<IndexSearcherRef, AtomicBoolean> searcher = indexSearchers.get( identifier );
         if ( searcher == null )
         {
-            searcher = synchGetIndexSearcher( identifier, false );
+            searcher = synchGetIndexSearcher( identifier, true );
         }
         else
         {
@@ -521,6 +521,7 @@ public class LuceneDataSource extends LogBackedXaDataSource
                 if ( searcher.first().isClosed() )
                 {
                     searcher = synchGetIndexSearcher( identifier, false );
+                    System.out.println( "------> Was closed dude, had to re-open" );
                 }
                 else if ( searcher.other().get() /*stale*/)
                 {
@@ -531,11 +532,11 @@ public class LuceneDataSource extends LogBackedXaDataSource
                         indexSearchers.put( identifier, searcher );
                     }
                 }
+                if ( incRef )
+                {
+                    searcher.first().incRef();
+                }
             }
-        }
-        if ( incRef )
-        {
-            searcher.first().incRef();
         }
         return searcher.first();
     }
@@ -568,6 +569,10 @@ public class LuceneDataSource extends LogBackedXaDataSource
                         indexSearchers.put( identifier, searcher );
                     }
                 }
+            }
+            if ( incRef )
+            {
+                searcher.first().incRef();
             }
             return searcher;
         }
