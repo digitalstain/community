@@ -3,7 +3,7 @@
   <parent>
     <groupId>org.neo4j.build</groupId>
     <artifactId>parent-central</artifactId>
-    <version>33</version>
+    <version>35</version>
     <relativePath />
   </parent>
 
@@ -69,9 +69,86 @@ the relevant Commercial Agreement.
   <distributionManagement>
     <site>
       <id>neo4j-site</id>
-      <url>scpexe://components.neo4j.org/home/neo/components/${project.artifactId}/${project.version}</url>
+      <url>scpexe://static.neo4j.org/var/www/components.neo4j.org/${project.artifactId}/${project.version}</url>
     </site>
   </distributionManagement>
+
+  <profiles>
+    <profile>
+      <id>freeze</id>
+      <activation>
+        <activeByDefault>false</activeByDefault>
+        <property>
+          <name>freeze</name>
+        </property>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+          <groupId>org.neo4j.build.plugins</groupId>
+          <artifactId>ease-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>aggregate-artifacts</id>
+                <goals>
+                  <goal>aggregate</goal>
+                </goals>
+                <configuration>
+                  <includes>
+                    <include>org.neo4j:*</include>
+                    <include>org.neo4j.app:*</include>
+                    <include>org.neo4j.examples:*</include>
+                  </includes>
+                </configuration>
+              </execution>
+              <execution>
+                <id>freeze-artifacts</id>
+                <phase>none</phase>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+      <dependencies>
+        <dependency>
+          <groupId>org.neo4j</groupId>
+          <artifactId>neo4j</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>org.neo4j</groupId>
+          <artifactId>neo4j-community</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>org.neo4j</groupId>
+          <artifactId>neo4j-graphviz</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>org.neo4j</groupId>
+          <artifactId>neo4j-shell</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>org.neo4j.app</groupId>
+          <artifactId>neo4j-server</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>org.neo4j.examples</groupId>
+          <artifactId>neo4j-examples</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+        <dependency>
+          <groupId>org.neo4j.examples</groupId>
+          <artifactId>neo4j-server-examples</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
+
 
 </project>
 

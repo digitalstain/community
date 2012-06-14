@@ -22,8 +22,9 @@ package org.neo4j.cypher.docgen
 import org.junit.Test
 import org.neo4j.cypher.CuteGraphDatabaseService.gds2cuteGds
 import org.neo4j.graphdb.{Node, Relationship}
+import org.neo4j.cypher.{StatisticsChecker, QueryStatistics}
 
-class CreateTest extends DocumentingTestBase {
+class CreateTest extends DocumentingTestBase with StatisticsChecker {
   def graphDescription = List()
 
   def section = "Create"
@@ -50,8 +51,8 @@ class CreateTest extends DocumentingTestBase {
     testQuery(
       title = "Return created node",
       text = "Creating a single node is done by issuing the following query.",
-      queryText = "create a = {name : 'Andres'} return a",
-      returns = "The newly created node is returned.",
+      queryText = "create (a {name : 'Andres'}) return a",
+      returns = "The newly created node is returned. This query uses the alternative syntax, which fits with how +RELATE+ looks.",
       assertions = (p) => assert(p.size === 1)
     )
   }
@@ -78,6 +79,19 @@ class CreateTest extends DocumentingTestBase {
     )
   }
 
+  @Test def using_expressions_as_nodes() {
+    val (aId, bId) = createTwoNodes
+
+    testQuery(
+      title = "Using expressions for nodes end points",
+      text = "You can use any expression as a node, as long as it returns a node. Just make sure to encase your " +
+        "expression in parenthesis.",
+      queryText = "start a=node(" + aId + ") with collect(a) as nodes start b=node(" + bId + ") create (head(nodes))-[r:REL]->b return r",
+      returns = "The created relationship is returned.",
+      assertions = (p) => assert(p.size === 1)
+    )
+  }
+
   @Test def set_property_to_an_iterable() {
     val (aId, bId) = db.inTx(() => {
       val a = db.createNode()
@@ -94,7 +108,7 @@ class CreateTest extends DocumentingTestBase {
       text = """When you set a property to an expression that returns a collection of values,
 Cypher will turn that into an array. All the elements in the collection must be of the same type
 for this to work.""",
-      queryText = "start n = node(" + aId + "," + bId + ") with collect(n.name) as names create new={ name : names } return new",
+      queryText = "start n = node(" + aId + "," + bId + ") with collect(n.name) as names create (new { name : names }) return new",
       returns = "A node with an array property named name is returned.",
       assertions = (p) => {
         val createdNode = p.toList.head("new").asInstanceOf[Node]
@@ -103,6 +117,17 @@ for this to work.""",
     )
   }
 
+  @Test def create_full_path_in_one_go() {
+    testQuery(
+      title = "Create a full path",
+      text =
+        """When you use CREATE and a pattern, all parts of the pattern that are not already in scope at this time
+will be created. """,
+      queryText = "create (andres {name:'Andres'})-[:WORKS_AT]->neo<-[:WORKS_AT]-(michael {name:'Michael'}) return andres,michael",
+      returns = "This query creates three nodes and two relationships in one go, and returns the end point " +
+        "of the created path",
+      assertions = (p) => assertStats(p, nodesCreated = 3, relationshipsCreated = 2, propertiesSet = 2))
+  }
 
   @Test def create_relationship_with_properties() {
     val (aId, bId) = db.inTx(() => {

@@ -60,7 +60,7 @@ class SematicErrorTest extends ExecutionEngineHelper {
 
   @Test def shouldKnowNotToCompareStringsAndNumbers() {
     expectedError("start a=node(0) where a.age =~ 13 return a",
-      "13.0 expected to be of type StringType but it is of type NumberType")
+      "13 expected to be of type StringType but it is of type NumberType")
   }
 
   @Test def shouldComplainAboutUnknownIdentifier() {
@@ -71,11 +71,6 @@ class SematicErrorTest extends ExecutionEngineHelper {
   @Test def shortestPathNeedsBothEndNodes() {
     expectedError("start n=node(0) match p=shortestPath(n-->b) return p",
       "Unknown identifier `b`")
-  }
-
-  @Test def create_relationships_missing_end_nodes() {
-    expectedError("create a-[r:REL]->b return r",
-      "Unknown identifier `a`\nUnknown identifier `b`")
   }
 
   def expectedError(query: String, message: String) {

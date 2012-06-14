@@ -31,11 +31,13 @@ import org.neo4j.server.plugins.PluginManager;
 
 public interface NeoServer
 {
+	void init();
+	
     void start();
 
-    Configuration getConfiguration();
-
     void stop();
+
+    Configuration getConfiguration();
 
     Database getDatabase();
 
@@ -43,6 +45,7 @@ public interface NeoServer
 
     PluginManager getExtensionManager();
 
+    @Deprecated
     Collection<Injectable<?>> getInjectables( List<String> packageNames );
 
     URI baseUri();

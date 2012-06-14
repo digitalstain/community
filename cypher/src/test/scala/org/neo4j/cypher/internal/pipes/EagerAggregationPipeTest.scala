@@ -28,7 +28,7 @@ import org.scalatest.junit.JUnitSuite
 import org.neo4j.cypher.SyntaxException
 import org.neo4j.cypher.internal.symbols._
 import collection.mutable.Map
-import java.lang.{Iterable=>JIterable}
+import java.lang.{Iterable => JIterable}
 
 class EagerAggregationPipeTest extends JUnitSuite {
   @Test def shouldReturnColumnsFromReturnItems() {
@@ -68,6 +68,17 @@ class EagerAggregationPipeTest extends JUnitSuite {
       Map("name" -> "Michael", "count(*)" -> 2)))
   }
 
+  @Test def shouldReturnZeroForEmptyInput() {
+    val source = new FakePipe(List(), createSymbolTableFor("name"))
+
+    val returnItems = List()
+    val grouping = List(CountStar(), Avg(Property("name", "age")), Collect(Property("name", "age")), Count(Property("name", "age")), Max(Property("name", "age")), Min(Property("name", "age")), Sum(Property("name", "age")))
+    val aggregationPipe = new EagerAggregationPipe(source, returnItems, grouping)
+
+    val results = getResults(aggregationPipe)
+    assertThat(results, hasItems(Map[String, Any]("avg(name.age)" -> null, "sum(name.age)" -> 0, "count(name.age)" -> 0, "min(name.age)" -> null, "collect(name.age)" -> List(), "max(name.age)" -> null, "count(*)" -> 0)))
+  }
+
   @Test def shouldCountNonNullValues() {
     val source = new FakePipe(List(
       Map("name" -> "Andres", "age" -> 36),
@@ -82,6 +93,7 @@ class EagerAggregationPipeTest extends JUnitSuite {
     assertEquals(List(Map("count(name)" -> 3)), aggregationPipe.createResults(QueryState()).toList)
   }
 
-  private def createSymbolTableFor(name:String) = new SymbolTable(Identifier(name, NodeType()))
-  private def getResults(p:Pipe):JIterable[Map[String, Any]] = p.createResults(QueryState()).map(_.m).toIterable.asJava
+  private def createSymbolTableFor(name: String) = new SymbolTable(Identifier(name, NodeType()))
+
+  private def getResults(p: Pipe): JIterable[Map[String, Any]] = p.createResults(QueryState()).map(_.m).toIterable.asJava
 }

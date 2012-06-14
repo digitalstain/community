@@ -33,12 +33,14 @@ import org.neo4j.kernel.info.DiagnosticsPhase;
 public interface Configurator
 {
     String SECURITY_RULES_KEY = "org.neo4j.server.rest.security_rules";
-    
+
     String DB_TUNING_PROPERTY_FILE_KEY = "org.neo4j.server.db.tuning.properties";
     String DEFAULT_CONFIG_DIR = File.separator + "etc" + File.separator + "neo";
     String DATABASE_LOCATION_PROPERTY_KEY = "org.neo4j.server.database.location";
     String NEO_SERVER_CONFIG_FILE_KEY = "org.neo4j.server.properties";
     String DB_MODE_KEY = "org.neo4j.server.database.mode";
+    
+    String DEFAULT_DATABASE_LOCATION_PROPERTY_KEY = "data/graph.db";
 
     int DEFAULT_WEBSERVER_PORT = 7474;
     String WEBSERVER_PORT_PROPERTY_KEY = "org.neo4j.server.webserver.port";
@@ -80,6 +82,7 @@ public interface Configurator
 
     String HTTP_LOGGING = "org.neo4j.server.http.log.enabled";
     String HTTP_LOG_CONFIG_LOCATION = "org.neo4j.server.http.log.config";
+    String WADL_ENABLED = "unsupported_wadl_generation_enabled";
 
     Configuration configuration();
 

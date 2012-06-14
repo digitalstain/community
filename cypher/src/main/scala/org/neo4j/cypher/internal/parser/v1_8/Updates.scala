@@ -19,32 +19,43 @@
  */
 package org.neo4j.cypher.internal.parser.v1_8
 
-import org.neo4j.cypher.internal.commands.{Foreach, SetProperty, DeleteEntityCommand, UpdateCommand}
+import org.neo4j.cypher.internal.mutation._
+import org.neo4j.cypher.internal.commands.{True, Entity, Property}
 
+trait Updates extends Base with Expressions with StartClause {
+  def updates: Parser[Seq[UpdateAction]] = rep(delete | set | foreach | relate) ^^ (cmds => cmds.flatten)
 
-trait Updates extends Base with Expressions {
-  def updates:Parser[Seq[UpdateCommand]] = (deleteThenSet | setThenDelete) ~ opt(foreach) ^^ {
-    case deleteAndSet ~ foreach => deleteAndSet ++ foreach.toSeq
+  def foreach: Parser[Seq[UpdateAction]] = ignoreCase("foreach") ~> "(" ~> identity ~ ignoreCase("in") ~ expression ~ ":" ~ opt(createStart) ~ opt(updates) <~ ")" ^^ {
+    case id ~ in ~ iterable ~ ":" ~ creates ~ innerUpdates => {
+      val createCmds = creates.toSeq.map(_.startItems.map(_.asInstanceOf[UpdateAction])).flatten
+      val updateCmds = innerUpdates.toSeq.flatten
+      List(ForeachAction(iterable, id, createCmds ++ updateCmds))
+    }
   }
 
-  def foreach:Parser[UpdateCommand] = ignoreCase("foreach") ~> "(" ~> identity ~ ignoreCase("in") ~ expression ~ ":" ~ updates <~ ")" ^^ {
-    case id ~ in ~ iterable ~ ":" ~ innerUpdates => Foreach(iterable, id, innerUpdates)
+  def delete: Parser[Seq[UpdateAction]] = ignoreCase("delete") ~> commaList(expression) ^^ {
+    case expressions => expressions.map {
+      case Property(entity, property) => DeletePropertyAction(Entity(entity), property)
+      case x => DeleteEntityAction(x)
+    }
   }
 
-  def deleteThenSet:Parser[Seq[UpdateCommand]] = opt(delete) ~ opt(set) ^^ {
-    case x ~ y => x.toSeq.flatten ++ y.toSeq.flatten
+  private def translate(abstractPattern: AbstractPattern): Maybe[RelateLink] = abstractPattern match {
+    case ParsedRelation(name, props, ParsedEntity(Entity(startName), startProps, True()), ParsedEntity(Entity(endName), endProps, True()), typ, dir, map, True()) if typ.size == 1 => Yes(RelateLink(
+      start = NamedExpectation(startName, startProps),
+      end = NamedExpectation(endName, endProps),
+      rel = NamedExpectation(name, props),
+      relType = typ.head,
+      dir = dir
+    ))
+    case _ => No("")
   }
 
-  def setThenDelete:Parser[Seq[UpdateCommand]] = opt(delete) ~ opt(set) ^^ {
-    case x ~ y => x.toSeq.flatten ++ y.toSeq.flatten
-  }
+  def set: Parser[Seq[UpdateAction]] = ignoreCase("set") ~> commaList(propertySet)
 
-  def delete: Parser[List[UpdateCommand]] = ignoreCase("delete") ~> comaList(expression) ^^
-    (expressions => expressions.map(DeleteEntityCommand(_)))
-
-  def set: Parser[List[UpdateCommand]] = ignoreCase("set") ~> comaList(propertySet)
+  def relate: Parser[Seq[UpdateAction]] = ignoreCase("relate") ~> usePattern(translate) ^^ (links => Seq(RelateAction(links: _*)))
 
   def propertySet = property ~ "=" ~ expression ^^ {
-    case p ~ "=" ~ e => SetProperty(p, e)
+    case p ~ "=" ~ e => PropertySetAction(p.asInstanceOf[Property], e)
   }
 }

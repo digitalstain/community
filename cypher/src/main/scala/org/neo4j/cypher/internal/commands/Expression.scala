@@ -73,6 +73,9 @@ case class Add(a: Expression, b: Expression) extends Expression {
     (aVal, bVal) match {
       case (x: Number, y: Number) => x.doubleValue() + y.doubleValue()
       case (x: String, y: String) => x + y
+      case (IsIterable(x), IsIterable(y)) => x ++ y
+      case (IsIterable(x), y) => x ++ Seq(y)
+      case (x, IsIterable(y)) => Seq(x) ++ y
       case _ => throw new CypherTypeException("Don't know how to add `" + aVal.toString + "` and `" + bVal.toString + "`")
     }
   }
@@ -126,7 +129,7 @@ case class Divide(a: Expression, b: Expression) extends Arithmetics(a, b) {
 }
 
 abstract class Arithmetics(left: Expression, right: Expression) extends Expression {
-  val identifier = Identifier("%s %s %s".format(left.identifier.name, operand, right.identifier.name), ScalarType())
+  val identifier = Identifier("%s %s %s".format(left.identifier.name, operand, right.identifier.name), NumberType())
   def operand: String
   def throwTypeError(bVal: Any, aVal: Any): Nothing = {
     throw new CypherTypeException("Don't know how to " + verb + " `" + name(bVal) + "` with `" + name(aVal) + "`")
@@ -161,6 +164,9 @@ abstract class Arithmetics(left: Expression, right: Expression) extends Expressi
 
 case class Literal(v: Any) extends Expression {
   def compute(m: Map[String, Any]) = v
+
+  override def apply(m: Map[String, Any]): Any = compute(m)
+
   val identifier = Identifier(name, AnyType.fromJava(v))
   private def name = v match {
     case null => "null"

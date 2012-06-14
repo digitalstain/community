@@ -45,6 +45,7 @@ abstract class DocumentingTestBase extends JUnitSuite {
   var relIndex: Index[Relationship] = null
   val properties: Map[String, Map[String, Any]] = Map()
   var generateConsole: Boolean = true
+  var generateInitialGraphForConsole: Boolean = true;
 
   def section: String
 
@@ -74,7 +75,7 @@ abstract class DocumentingTestBase extends JUnitSuite {
     if(generateConsole) {
       writer.println(".Try this query live")
       writer.println("[console]")
-      writer.println("----\n"+new GeoffService(db).toGeoff()+"\n"+query+"\n----")
+      writer.println("----\n"+ ( if(generateInitialGraphForConsole) new GeoffService(db).toGeoff() else "start n=node(*) match n-[r]->() delete n, r;")+"\n\n"+query+"\n----")
       writer.println()
     }
     writer.flush()
@@ -112,11 +113,16 @@ _Graph_
     graphViz.close()
   }
 
-  def testQuery(title: String, text: String, queryText: String, returns: String, assertions: (ExecutionResult => Unit)*) {
+  def executeQuery(queryText: String): ExecutionResult = {
     var query = queryText
     nodes.keySet.foreach((key) => query = query.replace("%" + key + "%", node(key).getId.toString))
-    val result = engine.execute(query)
-    assertions.foreach(_.apply(result))
+    engine.execute(query)
+  }
+  
+  def testQuery(title: String, text: String, queryText: String, returns: String, assertions: (ExecutionResult => Unit)*) {
+    val r = testWithoutDocs(queryText, assertions:_*)
+    val result: ExecutionResult = r._1
+    var query: String = r._2
 
     val dir = new File(path + nicefy(section))
     if (!dir.exists()) {
@@ -129,6 +135,15 @@ _Graph_
     val graphFileName = "cypher-" + this.getClass.getSimpleName.replaceAll("Test", "").toLowerCase + "-graph"
     val graphViz = new PrintWriter(new File(dir, graphFileName + ".txt"), "UTF-8")
     dumpGraphViz(graphViz, graphFileName)
+  }
+
+
+  def testWithoutDocs(queryText: String, assertions: (ExecutionResult => Unit)*): (ExecutionResult, String) = {
+    var query = queryText
+    nodes.keySet.foreach((key) => query = query.replace("%" + key + "%", node(key).getId.toString))
+    val result = engine.execute(query)
+    assertions.foreach(_.apply(result))
+    (result, query)
   }
 
   def indexProperties[T <: PropertyContainer](n: T, index: Index[T]) {

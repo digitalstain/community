@@ -32,13 +32,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.neo4j.graphdb.Direction;
 import org.neo4j.graphdb.Node;
+import org.neo4j.graphdb.Path;
 import org.neo4j.graphdb.Relationship;
 import org.neo4j.graphdb.RelationshipType;
 import org.neo4j.helpers.Predicate;
 import org.neo4j.helpers.Service;
 import org.neo4j.helpers.collection.FilteringIterator;
+import org.neo4j.kernel.Traversal;
+import org.neo4j.kernel.impl.util.SingleNodePath;
 import org.neo4j.shell.App;
 import org.neo4j.shell.AppCommandParser;
+import org.neo4j.shell.Continuation;
 import org.neo4j.shell.OptionDefinition;
 import org.neo4j.shell.OptionValueType;
 import org.neo4j.shell.Output;
@@ -92,7 +96,7 @@ public class Ls extends ReadOnlyGraphDatabaseApp
     }
 
     @Override
-    protected String exec( AppCommandParser parser, Session session,
+    protected Continuation exec( AppCommandParser parser, Session session,
         Output out ) throws ShellException, RemoteException
     {
         boolean brief = parser.options().containsKey( "b" );
@@ -142,7 +146,7 @@ public class Ls extends ReadOnlyGraphDatabaseApp
                 displayNodes( parser, thing, session, out );
             }
         }
-        return null;
+        return Continuation.INPUT_COMPLETE;
     }
 
     private void displayNodes( AppCommandParser parser, NodeOrRelationship thing,
@@ -330,8 +334,9 @@ public class Ls extends ReadOnlyGraphDatabaseApp
     {
         if ( sortByType )
         {
+            Path nodeAsPath = new SingleNodePath( node );
             return toSortedExpander( getServer().getDb(), Direction.BOTH, filterMap,
-                    caseInsensitiveFilters, looseFilters ).expand( node );
+                    caseInsensitiveFilters, looseFilters ).expand( nodeAsPath, Traversal.NO_BRANCH_STATE );
         }
         else
         {
@@ -341,7 +346,8 @@ public class Ls extends ReadOnlyGraphDatabaseApp
             }
             else
             {
-                return toExpander( getServer().getDb(), Direction.BOTH, filterMap, caseInsensitiveFilters, looseFilters ).expand( node );
+                Path nodeAsPath = new SingleNodePath( node );
+                return toExpander( getServer().getDb(), Direction.BOTH, filterMap, caseInsensitiveFilters, looseFilters ).expand( nodeAsPath, Traversal.NO_BRANCH_STATE );
             }
         }
     }

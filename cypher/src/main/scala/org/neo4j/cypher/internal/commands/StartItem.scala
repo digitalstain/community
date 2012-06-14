@@ -19,68 +19,123 @@
  */
 package org.neo4j.cypher.internal.commands
 
-import org.neo4j.cypher.internal.symbols.{Identifier, AnyType}
+import org.neo4j.cypher.internal.pipes.{QueryState, ExecutionContext}
+import org.neo4j.cypher.internal.mutation.{GraphElementPropertyFunctions, UpdateAction}
+import scala.Long
+import collection.Map
+import org.neo4j.graphdb.{DynamicRelationshipType, Node}
+import org.neo4j.cypher.internal.symbols._
 
 
-abstract sealed class StartItem(val identifierName:String) {
+abstract sealed class StartItem(val identifierName: String) {
   def mutating = false
 }
 
-abstract class RelationshipStartItem(id:String) extends StartItem(id)
-abstract class NodeStartItem(id:String) extends StartItem(id)
+abstract class RelationshipStartItem(id: String) extends StartItem(id)
 
-case class RelationshipById(varName:String, expression: Expression) extends RelationshipStartItem(varName)
-case class RelationshipByIndex(varName:String, idxName: String, key:Expression, expression: Expression) extends RelationshipStartItem(varName)
-case class RelationshipByIndexQuery(varName:String, idxName: String, query: Expression) extends RelationshipStartItem(varName)
+abstract class NodeStartItem(id: String) extends StartItem(id)
 
-case class NodeByIndex(varName:String, idxName: String, key:Expression, expression: Expression) extends NodeStartItem(varName)
-case class NodeByIndexQuery(varName:String, idxName: String, query: Expression) extends NodeStartItem(varName)
-case class NodeById(varName:String, expression:Expression) extends NodeStartItem(varName)
+case class RelationshipById(varName: String, expression: Expression) extends RelationshipStartItem(varName)
 
-case class AllNodes(columnName:String) extends NodeStartItem(columnName)
-case class AllRelationships(columnName:String) extends RelationshipStartItem(columnName)
+case class RelationshipByIndex(varName: String, idxName: String, key: Expression, expression: Expression) extends RelationshipStartItem(varName)
 
-case class CreateNodeStartItem(varName: String, properties: Map[String, Expression])
-  extends NodeStartItem(varName)
+case class RelationshipByIndexQuery(varName: String, idxName: String, query: Expression) extends RelationshipStartItem(varName)
+
+case class NodeByIndex(varName: String, idxName: String, key: Expression, expression: Expression) extends NodeStartItem(varName)
+
+case class NodeByIndexQuery(varName: String, idxName: String, query: Expression) extends NodeStartItem(varName)
+
+case class NodeById(varName: String, expression: Expression) extends NodeStartItem(varName)
+
+case class AllNodes(columnName: String) extends NodeStartItem(columnName)
+
+case class AllRelationships(columnName: String) extends RelationshipStartItem(columnName)
+
+case class CreateNodeStartItem(key: String, props: Map[String, Expression])
+  extends NodeStartItem(key)
   with Mutator
-  with UpdateCommand {
-  def dependencies: Seq[Identifier] = properties.values.flatMap(_.dependencies(AnyType())).toSeq
+  with UpdateAction
+  with GraphElementPropertyFunctions
+  with IterableSupport {
+  def exec(context: ExecutionContext, state: QueryState) = {
+    val db = state.db
+    if (props.size == 1 && props.head._1 == "*") {
+      makeTraversable(props.head._2(context)).map(x => {
+        val m: Map[String, Expression] = x.asInstanceOf[Map[String, Any]].map {
+          case (k, v) => (k -> Literal(v))
+        }
+        val node = db.createNode()
+        state.createdNodes.increase()
+        setProperties(node, m, context, state)
+        context.newWith(key -> node)
+      })
+    } else {
+      val node = db.createNode()
+      state.createdNodes.increase()
+      setProperties(node, props, context, state)
 
-  def filter(f: (Expression) => Boolean) = properties.values.filter(f).toSeq
-
-  def rewrite(f: (Expression) => Expression) = CreateNodeStartItem(varName, properties.map(mapRewrite(f)))
-}
-
-case class CreateRelationshipStartItem(varName: String, from: Expression, to: Expression, typ: String, properties: Map[String, Expression])
-  extends NodeStartItem(varName)
-  with Mutator
-  with UpdateCommand {
-  def dependencies: Seq[Identifier] = properties.values.flatMap(_.dependencies(AnyType())).toSeq ++
-    from.dependencies(AnyType()) ++
-    to.dependencies(AnyType())
-
-  def filter(f: (Expression) => Boolean) =  {
-    val fromSeq = if (f(from)) Seq(from) else Seq()
-    val toSeq = if (f(to)) Seq(to) else Seq()
-
-    val values: Iterable[Expression] = properties.values
-    fromSeq ++ toSeq ++ values.filter(f).toSet
+      Stream(context.newWith(key -> node))
+    }
   }
 
-  def rewrite(f: (Expression) => Expression) = CreateRelationshipStartItem(varName, f(from), f(to), typ, properties.map(mapRewrite(f)))
+  def dependencies = propDependencies(props)
+
+  def identifier = Seq(Identifier(key, NodeType()))
+
+  def filter(f: (Expression) => Boolean): Seq[Expression] = props.values.flatMap(_.filter(f)).toSeq
+
+  def rewrite(f: (Expression) => Expression): UpdateAction = CreateNodeStartItem(key, rewrite(props, f))
+}
+
+case class CreateRelationshipStartItem(key: String, from: (Expression, Map[String, Expression]), to: (Expression, Map[String, Expression]), typ: String, props: Map[String, Expression])
+  extends NodeStartItem(key)
+  with Mutator
+  with UpdateAction
+  with GraphElementPropertyFunctions {
+  private lazy val relationshipType = DynamicRelationshipType.withName(typ)
+
+  def dependencies = {
+    val fromDeps = nodeDependencies(from._1)
+    val toDeps = nodeDependencies(to._1)
+    val propDeps = propDependencies(props)
+    fromDeps ++ toDeps ++ propDeps
+  }
+
+  private def nodeDependencies(e:Expression):Seq[Identifier] = e match {
+    case Entity(_) => Seq()
+    case x => x.dependencies(NodeType())
+  }
+
+  def filter(f: (Expression) => Boolean): Seq[Expression] = from._1.filter(f) ++ props.values.flatMap(_.filter(f))
+
+  def rewrite(f: (Expression) => Expression) = CreateRelationshipStartItem(key, (f(from._1), from._2), (f(to._1), to._2), typ, props.map(mapRewrite(f)))
+
+  def exec(context: ExecutionContext, state: QueryState) = {
+    val f = from._1(context).asInstanceOf[Node]
+    val t = to._1(context).asInstanceOf[Node]
+    val relationship = f.createRelationshipTo(t, relationshipType)
+    state.createdRelationships.increase()
+    setProperties(relationship, props, context, state)
+    context.put(key, relationship)
+    Stream(context)
+  }
+
+  def identifier = Seq(Identifier(key, RelationshipType()))
 }
 
 trait Mutator extends StartItem {
   override def mutating = true
 
-  def mapRewrite(f: (Expression) => Expression)(kv:(String, Expression)):(String,Expression) = kv match { case (k,v) => (k, f(v)) }
+  def mapRewrite(f: (Expression) => Expression)(kv: (String, Expression)): (String, Expression) = kv match {
+    case (k, v) => (k, f(v))
+  }
 }
 
 object NodeById {
-  def apply(varName:String, id: Long*) = new NodeById(varName, Literal(id))
+  def apply(varName: String, id: Long*) = new NodeById(varName, Literal(id))
 }
 
 object RelationshipById {
-  def apply(varName:String, id: Long*) = new RelationshipById(varName, Literal(id))
+  def apply(varName: String, id: Long*) = new RelationshipById(varName, Literal(id))
 }
 

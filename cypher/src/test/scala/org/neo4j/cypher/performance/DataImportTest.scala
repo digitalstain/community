@@ -51,7 +51,6 @@ class DataImportTest extends Assertions {
 
     indexProvider.shutdown();
     inserter.shutdown();
-
   }
 
   private def addRatings(sourceDir: File, movies: Map[String, Long], inserter: BatchInserterImpl, typeIdx: BatchInserterIndex) = {

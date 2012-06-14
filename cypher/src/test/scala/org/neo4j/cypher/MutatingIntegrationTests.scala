@@ -23,9 +23,10 @@ import org.junit.Test
 import org.junit.Assert._
 import collection.JavaConverters._
 import org.scalatest.Assertions
-import org.neo4j.graphdb.{TransactionFailureException, NotFoundException, Relationship, Node}
+import org.neo4j.graphdb.{NotFoundException, Relationship, Node}
+import java.util.HashMap
 
-class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
+class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions with StatisticsChecker {
 
   val stats = QueryStatistics.empty
 
@@ -33,24 +34,20 @@ class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
   def create_a_single_node() {
     val before = graph.getAllNodes.asScala.size
 
-    val result = parseAndExecute("create a = {}")
+    val result = parseAndExecute("create a")
 
-    assert(result.queryStatistics() === stats.copy(
-      nodesCreated = 1
-    ))
+    assertStats(result, nodesCreated = 1)
     assert(graph.getAllNodes.asScala.size === before + 1)
   }
+
 
   @Test
   def create_a_single_node_with_props_and_return_it() {
     val before = graph.getAllNodes.asScala.size
 
-    val result = parseAndExecute("create a = {name : 'Andres'} return a")
+    val result = parseAndExecute("create (a {name : 'Andres'}) return a")
 
-    assert(result.queryStatistics() === stats.copy(
-      nodesCreated = 1,
-      propertiesSet = 1
-    ))
+    assertStats(result, nodesCreated = 1, propertiesSet = 1)
     assert(graph.getAllNodes.asScala.size === before + 1)
 
     assert(graph.getAllNodes.asScala.size === before + 1)
@@ -65,12 +62,9 @@ class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
   def start_with_a_node_and_create_a_new_node_with_the_same_properties() {
     createNode("age" -> 15)
 
-    val result = parseAndExecute("start a = node(1) with a create b = {age : a.age * 2} return b")
+    val result = parseAndExecute("start a = node(1) with a create (b {age : a.age * 2}) return b")
 
-    assert(result.queryStatistics() === stats.copy(
-      nodesCreated = 1,
-      propertiesSet = 1
-    ))
+    assertStats(result, nodesCreated = 1, propertiesSet = 1)
 
     val list = result.toList
     assert(list.size === 1)
@@ -80,29 +74,19 @@ class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
 
   @Test
   def create_two_nodes_and_a_relationship_between_them() {
-    val result = parseAndExecute("create a = {}, b = {}, a-[r:REL]->b return r")
+    val result = parseAndExecute("create a, b, a-[r:REL]->b")
 
-    assert(result.queryStatistics() === stats.copy(
-      nodesCreated = 2,
-      relationshipsCreated = 1
-    ))
-
-    val list = result.toList
-    assert(list.size === 1)
-
-    val createdNode = list.head("r").asInstanceOf[Relationship]
+    assertStats(result, nodesCreated = 2, relationshipsCreated = 1)
   }
 
   @Test
   def create_one_node_and_dumpToString() {
-    createNode("age" -> 15)
+    val result = parseAndExecute("create (a {name:'Cypher'})")
 
-    val result = parseAndExecute("create a = {name:'Cypher'}")
-
-    assert(result.queryStatistics() === stats.copy(
+    assertStats(result,
       nodesCreated = 1,
       propertiesSet = 1
-    ))
+    )
 
     val txt = result.dumpToString()
     println(txt)
@@ -113,9 +97,7 @@ class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
     val a = createNode().getId
 
     val result = parseAndExecute("start a = node(1) delete a")
-    assert(result.queryStatistics() === stats.copy(
-      deletedNodes = 1
-    ))
+    assertStats(result,       deletedNodes = 1    )
 
     assert(result.toList === List())
     intercept[NotFoundException](graph.getNodeById(a))
@@ -126,9 +108,7 @@ class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
     (1 to 4).foreach(i => createNode())
 
     val result = parseAndExecute("start a = node(1),b=node(2,3,4) delete a")
-    assert(result.queryStatistics() === stats.copy(
-      deletedNodes = 1
-    ))
+    assertStats(result, deletedNodes = 1)
 
     assert(result.toList === List())
   }
@@ -145,9 +125,7 @@ class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
     relate(a, d)
 
     val result = parseAndExecute("start a = node(1) match a-[r]->() delete r")
-    assert(result.queryStatistics() === stats.copy(
-      deletedRelationships = 3
-    ))
+    assertStats(result,        deletedRelationships = 3    )
 
     assert(a.getRelationships.asScala.size === 0)
   }
@@ -158,12 +136,11 @@ class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
     val b = createNode()
     val c = createNode()
 
-    val result = parseAndExecute("create n = {} with n start x = node(1,2,3) create n-[:REL]->x")
-    val statistics = result.queryStatistics()
-    assert(statistics === stats.copy(
+    val result = parseAndExecute("create n with n start x = node(1,2,3) create n-[:REL]->x")
+    assertStats(result,
       nodesCreated = 1,
       relationshipsCreated = 3
-    ))
+    )
 
     assert(a.getRelationships.asScala.size === 1)
     assert(b.getRelationships.asScala.size === 1)
@@ -175,10 +152,7 @@ class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
     val a = createNode("name" -> "Andres")
 
     val result = parseAndExecute("start n=node(1) set n.name = 'Michael'")
-    val statistics = result.queryStatistics()
-    assert(statistics === stats.copy(
-      propertiesSet = 1
-    ))
+    assertStats(result,      propertiesSet = 1    )
 
     assert(a.getProperty("name") === "Michael")
   }
@@ -188,10 +162,9 @@ class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
     val a = createNode("name" -> "Andres")
 
     val result = parseAndExecute("start n=node(1) set n.name = n.name + ' was here'")
-    val statistics = result.queryStatistics()
-    assert(statistics === stats.copy(
+    assertStats(result,
       propertiesSet = 1
-    ))
+    )
 
     assert(a.getProperty("name") === "Andres was here")
   }
@@ -202,12 +175,11 @@ class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
     createNode("Michael")
     createNode("Peter")
 
-    val result = parseAndExecute("start n=node(1,2,3) with collect(n.name) as names create new = {name : names}")
-    val statistics = result.queryStatistics()
-    assert(statistics === stats.copy(
+    val result = parseAndExecute("start n=node(1,2,3) with collect(n.name) as names create ({name : names})")
+    assertStats(result,
       propertiesSet = 1,
       nodesCreated = 1
-    ))
+    )
 
     assert(graph.getNodeById(4).getProperty("name") === Array("Andres", "Michael", "Peter"))
   }
@@ -216,19 +188,18 @@ class MutatingIntegrationTests extends ExecutionEngineHelper with Assertions {
   def set_a_property_to_an_empty_collection() {
     createNode("Andres")
 
-    val result = parseAndExecute("start n=node(1) with filter(x in collect(n.name) : x = 12) as names create new = {x : names}")
-    val statistics = result.queryStatistics()
-    assert(statistics === stats.copy(
+    val result = parseAndExecute("start n=node(1) with filter(x in collect(n.name) : x = 12) as names create ({x : names})")
+    assertStats(result,
       propertiesSet = 1,
       nodesCreated = 1
-    ))
+    )
 
     assert(graph.getNodeById(2).getProperty("x") === Array())
   }
 
   @Test
   def create_node_from_map_values() {
-    parseAndExecute("create n = {a} return n", "a" -> Map("name" -> "Andres", "age" -> 66))
+    parseAndExecute("create (n {a}) return n", "a" -> Map("name" -> "Andres", "age" -> 66))
     val n = graph.createdNodes.dequeue()
     assert(n.getProperty("name") === "Andres")
     assert(n.getProperty("age") === 66)
@@ -269,7 +240,7 @@ match p=a-->b-->c
 foreach(n in nodes(p) :
   set n.marked = true
 )
-    """
+            """
 
     parseAndExecute(q)
 
@@ -283,8 +254,8 @@ foreach(n in nodes(p) :
     val a = createNode()
     val b = createNode()
 
-    relate(a,b, "HATES")
-    relate(a,b, "LOVES")
+    relate(a, b, "HATES")
+    relate(a, b, "LOVES")
 
     intercept[NodeStillHasRelationshipsException](parseAndExecute("start n = node(1) match n-[r:HATES]->() delete n,r"))
   }
@@ -304,12 +275,12 @@ foreach(n in nodes(p) :
       Map("name" -> "Michael", "prefers" -> "Java"),
       Map("name" -> "Peter", "prefers" -> "Java"))
 
-    val statistics = parseAndExecute("create n = {params}", "params" -> maps).queryStatistics()
+    val result = parseAndExecute("create ({params})", "params" -> maps)
 
-    assert(statistics === stats.copy(
+    assertStats(result,
       nodesCreated = 3,
       propertiesSet = 6
-    ))
+    )
   }
 
   @Test
@@ -319,7 +290,7 @@ foreach(n in nodes(p) :
       Map("name" -> "Michael"),
       Map("name" -> "Peter"))
 
-    val result = parseAndExecute("create n = {params} return n", "params" -> maps).toList
+    val result = parseAndExecute("create (n {params}) return n", "params" -> maps).toList
     assert(result.size === 3)
   }
 
@@ -334,7 +305,7 @@ foreach(n in nodes(p) :
       Map("name" -> "Michael"),
       Map("name" -> "Peter"))
 
-    intercept[ParameterWrongTypeException](parseAndExecute("create a = {params1}, b = {params2}", "params1" -> maps1, "params2" -> maps2))
+    intercept[ParameterWrongTypeException](parseAndExecute("create (a {params1}), (b {params2})", "params1" -> maps1, "params2" -> maps2))
   }
 
   @Test
@@ -344,13 +315,141 @@ foreach(n in nodes(p) :
     val b = createNode("Beta")
     val c = createNode("Gamma")
 
-    relate(root,a)
-    relate(root,b)
-    relate(root,c)
+    relate(root, a)
+    relate(root, b)
+    relate(root, c)
 
-    parseAndExecute("start root=node(1) match root-->other create new={name:other.name}, root-[:REL]->new")
+    parseAndExecute("start root=node(1) match root-->other create (new {name:other.name}), root-[:REL]->new")
 
     val result = parseAndExecute("start root=node(1) match root-->other return other.name order by other.name").columnAs[String]("other.name").toList
-    assert(result === List("Alfa","Alfa","Beta","Beta","Gamma","Gamma"))
+    assert(result === List("Alfa", "Alfa", "Beta", "Beta", "Gamma", "Gamma"))
+  }
+
+  @Test
+  def create_node_and_rel_in_foreach() {
+    parseAndExecute("""
+create center
+foreach(x in range(1,10) :
+  create (leaf1 {number : x}) , center-[:X]->leaf1
+)
+return distinct center""")
+  }
+
+  @Test
+  def extract_on_arrays() {
+    val result = parseAndExecute( """start n=node(0) set n.x=[1,2,3] return extract (i in n.x : i/2) as x""")
+    assert(result.toList == List(Map("x" -> List(0.5, 1.0, 1.5))))
+  }
+
+  @Test
+  def delete_optionals() {
+    createNode()
+    val a = createNode()
+    val b = createNode()
+    relate(a,b)
+
+    parseAndExecute("""start n=node(*) match n-[r?]-() delete n,r""")
+    assert(graph.getAllNodes.asScala.size === 0)
+  }
+
+  @Test
+  def delete_path() {
+    val a = createNode()
+    val b = createNode()
+    relate(a,b)
+
+    parseAndExecute("""start n=node(1) match p=n-->() delete p""")
+    assert(graph.getAllNodes.asScala.size === 1)
+  }
+
+  @Test
+  def string_literals_should_not_be_mistaken_for_identifiers() {
+    //https://github.com/neo4j/community/issues/523
+    val result = executeScalar[List[Node]]("create (tag1 {name:'tag2'}), (tag2 {name:'tag1'}) return [tag1,tag2] as tags")
+    assert(result.size == 2)
+  }
+
+  @Test
+  def concatenate_to_a_collection() {
+    val result = executeScalar[Array[Long]]("create a={foo:[1,2,3]} set a.foo = a.foo + [4,5] return a.foo")
+
+    assert(result === Array(1,2,3,4,5))
+  }
+
+  @Test
+  def concatenate_to_a_collection_in_reverse() {
+    val result = executeScalar[Array[Long]]("create a={foo:[3,4,5]} set a.foo = [1,2] + a.foo return a.foo")
+
+    assert(result === Array(1,2,3,4,5))
+  }
+
+  @Test
+  def create_node_from_map_with_array_value_from_java() {
+    val list = new java.util.ArrayList[String]()
+    list.add("foo")
+    list.add("bar")
+
+    val map = new java.util.HashMap[String, Object]()
+    map.put("arrayProp", list)
+
+    val q = "create a={param} return a.arrayProp"
+    val result =  executeScalar[Array[String]](q, "param" -> map)
+
+    assertStats(parseAndExecute(q, "param"->map), nodesCreated = 1, propertiesSet = 1)
+    assert(result === Array("foo","bar"))
+  }
+
+  @Test
+  def failed_query_should_not_leave_dangling_transactions() {
+    intercept[NotFoundException](parseAndExecute("START left=node(1), right=node(3,4) RELATE left-[r:KNOWS]->right RETURN r"))
+
+    assertNull("Did not expect to be in a transaction now", graph.getTxManager.getTransaction)
+  }
+
+  @Test
+  def relate_twice_with_param_map() {
+    createNode()
+    createNode()
+
+    val map1 = Map("name" -> "Anders")
+    val map2 = new HashMap[String, Any]()
+    map2.put("name", "Anders")
+
+    val r1 = executeScalar[Relationship]("start a=node(1), b=node(2) relate a-[r:FOO {param}]->b return r", "param" -> map1)
+    val r2 = executeScalar[Relationship]("start a=node(1), b=node(2) relate a-[r:FOO {param}]->b return r", "param" -> map2)
+
+    assert(r1 === r2)
+  }
+
+  @Test
+  def relate_twice_with_array_prop() {
+    createNode()
+    createNode()
+
+    parseAndExecute("start a=node(1) relate a-[:X]->({foo:[1,2,3]})")
+    val result = parseAndExecute("start a=node(1) relate a-[:X]->({foo:[1,2,3]})")
+
+    assertFalse("Should not have created node", result.queryStatistics().containsUpdates)
+  }
+
+  @Test
+  def full_path_in_one_create() {
+    createNode()
+    createNode()
+    val result = parseAndExecute("start a=node(1), b=node(2) create a-[:KNOWS]->()<-[:LOVES]->b")
+
+    assertStats(result, nodesCreated = 1, relationshipsCreated = 2)
+  }
+}
+
+trait StatisticsChecker extends Assertions {
+  def assertStats(result: ExecutionResult,
+                  nodesCreated: Long = 0,
+                  relationshipsCreated: Long = 0,
+                  propertiesSet: Long = 0,
+                  deletedNodes: Long = 0,
+                  deletedRelationships: Long = 0) {
+    assert(result.queryStatistics() === QueryStatistics(nodesCreated, relationshipsCreated, propertiesSet, deletedNodes, deletedRelationships)
+    )
   }
 }

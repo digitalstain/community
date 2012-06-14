@@ -26,8 +26,10 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -55,6 +57,7 @@ import org.mortbay.resource.Resource;
 import org.mortbay.thread.QueuedThreadPool;
 import org.neo4j.kernel.guard.Guard;
 import org.neo4j.server.NeoServer;
+import org.neo4j.server.configuration.Configurator;
 import org.neo4j.server.guard.GuardingRequestFilter;
 import org.neo4j.server.logging.Logger;
 import org.neo4j.server.rest.security.SecurityFilter;
@@ -71,6 +74,31 @@ import com.sun.jersey.spi.container.servlet.ServletContainer;
 
 public class Jetty6WebServer implements WebServer
 {
+	private static class FilterDefinition
+	{
+		private final Filter filter;
+		private final String pathSpec;
+
+		public FilterDefinition(Filter filter, String pathSpec)
+		{
+			this.filter = filter;
+			this.pathSpec = pathSpec;
+		}
+		
+		public boolean matches(Filter filter, String pathSpec)
+		{
+			return filter == this.filter && pathSpec.equals(this.pathSpec);
+		}
+
+		public Filter getFilter() {
+			return filter;
+		}
+
+		public String getPathSpec() {
+			return pathSpec;
+		}
+	}
+	
     private static final int DEFAULT_HTTPS_PORT = 7473;
     public static final Logger log = Logger.getLogger( Jetty6WebServer.class );
     public static final int DEFAULT_PORT = 80;
@@ -83,15 +111,22 @@ public class Jetty6WebServer implements WebServer
 
     private final HashMap<String, String> staticContent = new HashMap<String, String>();
     private final HashMap<String, ServletHolder> jaxRSPackages = new HashMap<String, ServletHolder>();
-
+    private final List<FilterDefinition> filters = new ArrayList<FilterDefinition>();
+    
     private NeoServer server;
     private int jettyMaxThreads = tenThreadsPerProcessor();
     private boolean httpsEnabled = false;
     private KeyStoreInformation httpsCertificateInformation = null;
-    private SslSocketConnectorFactory sslSocketFactory = new SslSocketConnectorFactory();
+    private final SslSocketConnectorFactory sslSocketFactory = new SslSocketConnectorFactory();
+	private File requestLoggingConfiguration;
 
     @Override
     public void init()
+    {
+    }
+    
+    @Override
+    public void start()
     {
         if ( jetty == null )
         {
@@ -103,16 +138,29 @@ public class Jetty6WebServer implements WebServer
 
             jetty.addConnector( connector );
 
-            if(httpsEnabled) {
-               if(httpsCertificateInformation != null) {
-                   jetty.addConnector( sslSocketFactory.createConnector(httpsCertificateInformation, jettyAddr, jettyHttpsPort) );
-               } else {
-                   throw new RuntimeException("HTTPS set to enabled, but no HTTPS configuration provided.");
-               }
+            if ( httpsEnabled )
+            {
+                if ( httpsCertificateInformation != null )
+                {
+                    jetty.addConnector(
+                        sslSocketFactory.createConnector( httpsCertificateInformation, jettyAddr, jettyHttpsPort ) );
+                }
+                else
+                {
+                    throw new RuntimeException( "HTTPS set to enabled, but no HTTPS configuration provided." );
+                }
             }
 
             jetty.setThreadPool( new QueuedThreadPool( jettyMaxThreads ) );
         }
+        
+        MovedContextHandler redirector = new MovedContextHandler();
+
+        jetty.addHandler( redirector );
+
+        loadAllMounts();
+
+        startJetty();
     }
 
     @Override
@@ -122,6 +170,7 @@ public class Jetty6WebServer implements WebServer
         {
             jetty.stop();
             jetty.join();
+            jetty = null;
         }
         catch ( Exception e )
         {
@@ -157,13 +206,43 @@ public class Jetty6WebServer implements WebServer
 
         ServletContainer container = new NeoServletContainer( server, server.getInjectables( packageNames ) );
         ServletHolder servletHolder = new ServletHolder( container );
-        servletHolder.setInitParameter( ResourceConfig.FEATURE_DISABLE_WADL, String.valueOf( true ) );
-        servletHolder.setInitParameter( "com.sun.jersey.config.property.packages", toCommaSeparatedList( packageNames ) );
+        if ( !Boolean.valueOf( String.valueOf( server.getConfiguration().getProperty( Configurator.WADL_ENABLED ) ) ) )
+        {
+            servletHolder.setInitParameter( ResourceConfig.FEATURE_DISABLE_WADL, String.valueOf( true ) );
+        }
+        servletHolder.setInitParameter( "com.sun.jersey.config.property.packages",
+            toCommaSeparatedList( packageNames ) );
         servletHolder.setInitParameter( ResourceConfig.PROPERTY_CONTAINER_RESPONSE_FILTERS,
-                AllowAjaxFilter.class.getName() );
+            AllowAjaxFilter.class.getName() );
         log.debug( "Adding JAXRS packages %s at [%s]", packageNames, mountPoint );
 
         jaxRSPackages.put( mountPoint, servletHolder );
+    }
+    
+    @Override
+	public void removeJAXRSPackages( List<String> packageNames, String serverMountPoint )
+    {
+    	jaxRSPackages.remove(serverMountPoint);
+    }
+
+    @Override
+    public void addFilter(Filter filter, String pathSpec)
+    {
+    	filters.add(new FilterDefinition(filter, pathSpec));
+    }
+    
+    @Override
+    public void removeFilter(Filter filter, String pathSpec)
+    {
+    	Iterator<FilterDefinition> iter = filters.iterator();
+    	while(iter.hasNext())
+    	{
+    		FilterDefinition current = iter.next();
+    		if(current.matches(filter, pathSpec))
+    		{
+    			iter.remove();
+    		}
+    	}
     }
 
     @Override
@@ -172,69 +251,53 @@ public class Jetty6WebServer implements WebServer
         this.server = server;
     }
 
-    @Override
-    public void start()
-    {
-        if ( jetty == null )
-        {
-            throw new IllegalStateException( "Jetty not initialized." );
-        }
-        MovedContextHandler redirector = new MovedContextHandler();
-
-        jetty.addHandler( redirector );
-
-        loadAllMounts();
-
-        startJetty();
-    }
-
-    @Override
+	@Override
     public void addStaticContent( String contentLocation, String serverMountPoint )
     {
         staticContent.put( serverMountPoint, contentLocation );
     }
+    
+    @Override
+	public void removeStaticContent( String contentLocation, String serverMountPoint )
+    {
+    	staticContent.remove(serverMountPoint);
+    }
 
     @Override
     public void invokeDirectly( String targetPath, HttpServletRequest request, HttpServletResponse response )
-            throws IOException, ServletException
+        throws IOException, ServletException
     {
         jetty.handle( targetPath, request, response, Handler.REQUEST );
     }
 
-
     @Override
-    public Server getJetty()
+    public void setHttpLoggingConfiguration( File logbackConfigFile )
     {
-        return jetty;
+    	this.requestLoggingConfiguration = logbackConfigFile;
     }
 
     @Override
-    public void enableHTTPLoggingForWebadmin( File logbackConfigFile )
+    public void setEnableHttps( boolean enable )
     {
-        final RequestLogImpl requestLog = new RequestLogImpl();
-        requestLog.setFileName( logbackConfigFile.getAbsolutePath() );
-
-        final RequestLogHandler requestLogHandler = new RequestLogHandler();
-        requestLogHandler.setRequestLog( requestLog );
-
-        jetty.addHandler( requestLogHandler );
-    }
-
-    @Override
-    public void setEnableHttps( boolean enable ) {
         httpsEnabled = enable;
     }
 
     @Override
-    public void setHttpsPort( int portNo )  {
+    public void setHttpsPort( int portNo )
+    {
         jettyHttpsPort = portNo;
     }
 
     @Override
-    public void setHttpsCertificateInformation( KeyStoreInformation config ) {
+    public void setHttpsCertificateInformation( KeyStoreInformation config )
+    {
         httpsCertificateInformation = config;
     }
 
+    public Server getJetty()
+    {
+        return jetty;
+    }
 
     protected void startJetty()
     {
@@ -251,7 +314,7 @@ public class Jetty6WebServer implements WebServer
     private int tenThreadsPerProcessor()
     {
         return 10 * Runtime.getRuntime()
-                .availableProcessors();
+            .availableProcessors();
     }
 
     private void loadAllMounts()
@@ -266,6 +329,11 @@ public class Jetty6WebServer implements WebServer
                 return o2.compareTo( o1 );
             }
         } );
+        
+        if(requestLoggingConfiguration != null)
+        {
+        	loadRequestLogging();
+        }
 
         mountpoints.addAll( staticContent.keySet() );
         mountpoints.addAll( jaxRSPackages.keySet() );
@@ -277,7 +345,8 @@ public class Jetty6WebServer implements WebServer
 
             if ( isStatic && isJaxrs )
             {
-                throw new RuntimeException( format( "content-key '%s' is mapped twice (static and jaxrs)", contentKey ) );
+                throw new RuntimeException(
+                    format( "content-key '%s' is mapped twice (static and jaxrs)", contentKey ) );
             }
             else if ( isStatic )
             {
@@ -293,8 +362,18 @@ public class Jetty6WebServer implements WebServer
             }
         }
     }
+    
+    private void loadRequestLogging() {
+        final RequestLogImpl requestLog = new RequestLogImpl();
+        requestLog.setFileName( requestLoggingConfiguration.getAbsolutePath() );
 
-    private String trimTrailingSlashToKeepJettyHappy( String mountPoint )
+        final RequestLogHandler requestLogHandler = new RequestLogHandler();
+        requestLogHandler.setRequestLog( requestLog );
+
+        jetty.addHandler( requestLogHandler );
+	}
+
+	private String trimTrailingSlashToKeepJettyHappy( String mountPoint )
     {
         if ( mountPoint.equals( "/" ) )
         {
@@ -324,7 +403,8 @@ public class Jetty6WebServer implements WebServer
         }
         catch ( URISyntaxException e )
         {
-            log.debug( "Unable to translate [%s] to a relative URI in ensureRelativeUri(String mountPoint)", mountPoint );
+            log.debug( "Unable to translate [%s] to a relative URI in ensureRelativeUri(String mountPoint)",
+                mountPoint );
             return mountPoint;
         }
     }
@@ -339,23 +419,28 @@ public class Jetty6WebServer implements WebServer
             staticContext.setServer( getJetty() );
             staticContext.setContextPath( mountPoint );
             URL resourceLoc = getClass().getClassLoader()
-                    .getResource( contentLocation );
+                .getResource( contentLocation );
             if ( resourceLoc != null )
             {
                 log.debug( "Found [%s]", resourceLoc );
                 URL url = resourceLoc.toURI()
-                        .toURL();
+                    .toURL();
                 final Resource resource = Resource.newResource( url );
                 staticContext.setBaseResource( resource );
                 log.debug( "Mounting static content from [%s] at [%s]", url, mountPoint );
+                
+                addFiltersTo(staticContext);
+                
                 jetty.addHandler( staticContext );
-            } else
+            }
+            else
             {
                 log.error(
-                        "No static content available for Neo Server at port [%d], management console may not be available.",
-                        jettyHttpPort );
+                    "No static content available for Neo Server at port [%d], management console may not be available.",
+                    jettyHttpPort );
             }
-        } catch ( Exception e )
+        }
+        catch ( Exception e )
         {
             log.error( e );
             e.printStackTrace();
@@ -363,7 +448,7 @@ public class Jetty6WebServer implements WebServer
         }
     }
 
-    private void loadJAXRSPackage( SessionManager sm, String mountPoint )
+	private void loadJAXRSPackage( SessionManager sm, String mountPoint )
     {
         ServletHolder servletHolder = jaxRSPackages.get( mountPoint );
         log.debug( "Mounting servlet at [%s]", mountPoint );
@@ -371,7 +456,17 @@ public class Jetty6WebServer implements WebServer
         SessionHandler sh = new SessionHandler( sm );
         jerseyContext.addServlet( servletHolder, "/*" );
         jerseyContext.setSessionHandler( sh );
+        addFiltersTo(jerseyContext);
     }
+
+    private void addFiltersTo(Context context) {
+    	for(FilterDefinition filterDef : filters)
+    	{
+            context.addFilter( new FilterHolder( 
+            		filterDef.getFilter() ), 
+            		filterDef.getPathSpec(), Handler.ALL );
+    	}
+	}
 
     private String toCommaSeparatedList( List<String> packageNames )
     {
@@ -402,12 +497,14 @@ public class Jetty6WebServer implements WebServer
                         final Context context = (Context) handler;
                         for ( SecurityRule rule : rules )
                         {
-                            if(new UriPathWildcardMatcher(rule.forUriPath()).matches(context.getContextPath()))
+                            if ( new UriPathWildcardMatcher( rule.forUriPath() ).matches( context.getContextPath() ) )
                             {
                                 final Filter jettyFilter = new SecurityFilter( rule );
                                 context.addFilter( new FilterHolder( jettyFilter ), "/*", Handler.ALL );
-                                log.info( "Security rule [%s] installed on server", rule.getClass().getCanonicalName() );
-                                System.out.println( String.format("Security rule [%s] installed on server", rule.getClass().getCanonicalName() )) ;
+                                log.info( "Security rule [%s] installed on server",
+                                    rule.getClass().getCanonicalName() );
+                                System.out.println( String.format( "Security rule [%s] installed on server",
+                                    rule.getClass().getCanonicalName() ) );
                             }
                         }
                     }

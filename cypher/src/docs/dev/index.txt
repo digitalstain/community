@@ -20,6 +20,10 @@ include::updating.txt[]
 
 include::transactions.txt[]
 
+:leveloffset: 1
+
+include::ql/pattern/patterns.txt[]
+
 :leveloffset: 2
 
 include::ql/start/index.txt[]
@@ -67,6 +71,10 @@ include::ql/delete/index.txt[]
 :leveloffset: 2
 
 include::ql/set/index.txt[]
+
+:leveloffset: 2
+
+include::ql/relate/index.txt[]
 
 :leveloffset: 2
 

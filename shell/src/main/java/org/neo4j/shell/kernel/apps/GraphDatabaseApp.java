@@ -37,16 +37,18 @@ import org.neo4j.graphdb.GraphDatabaseService;
 import org.neo4j.graphdb.Node;
 import org.neo4j.graphdb.NotFoundException;
 import org.neo4j.graphdb.Path;
+import org.neo4j.graphdb.PathExpander;
 import org.neo4j.graphdb.PropertyContainer;
 import org.neo4j.graphdb.Relationship;
-import org.neo4j.graphdb.RelationshipExpander;
 import org.neo4j.graphdb.RelationshipType;
 import org.neo4j.graphdb.Transaction;
+import org.neo4j.graphdb.traversal.BranchState;
 import org.neo4j.helpers.Pair;
 import org.neo4j.kernel.OrderedByTypeExpander;
 import org.neo4j.kernel.Traversal;
 import org.neo4j.shell.App;
 import org.neo4j.shell.AppCommandParser;
+import org.neo4j.shell.Continuation;
 import org.neo4j.shell.OptionDefinition;
 import org.neo4j.shell.OptionValueType;
 import org.neo4j.shell.Output;
@@ -95,7 +97,7 @@ public abstract class GraphDatabaseApp extends AbstractApp
     public static NodeOrRelationship getCurrent(
         GraphDatabaseShellServer server, Session session ) throws ShellException
     {
-        String currentThing = ( String ) safeGet( session, CURRENT_KEY );
+        String currentThing = ( String ) session.get( CURRENT_KEY );
         NodeOrRelationship result = null;
         if ( currentThing == null )
         {
@@ -126,20 +128,20 @@ public abstract class GraphDatabaseApp extends AbstractApp
 
     public static boolean isCurrent( Session session, NodeOrRelationship thing )
     {
-        String currentThing = ( String ) safeGet( session, CURRENT_KEY );
+        String currentThing = ( String ) session.get( CURRENT_KEY );
         return currentThing != null && currentThing.equals(
                 thing.getTypedId().toString() );
     }
     
     protected static void clearCurrent( Session session )
     {
-        safeSet( session, CURRENT_KEY, new TypedId( NodeOrRelationship.TYPE_NODE, 0 ).toString() );
+        session.set( CURRENT_KEY, new TypedId( NodeOrRelationship.TYPE_NODE, 0 ).toString() );
     }
 
     protected static void setCurrent( Session session,
         NodeOrRelationship current )
     {
-        safeSet( session, CURRENT_KEY, current.getTypedId().toString() );
+        session.set( CURRENT_KEY, current.getTypedId().toString() );
     }
 
     protected void assertCurrentIsNode( Session session )
@@ -219,13 +221,13 @@ public abstract class GraphDatabaseApp extends AbstractApp
         return this.getServer().getDb().getNodeById( id );
     }
     
-    public String execute( AppCommandParser parser, Session session,
+    public Continuation execute( AppCommandParser parser, Session session,
         Output out ) throws Exception
     {
         Transaction tx = getServer().getDb().beginTx();
         try
         {
-            String result = this.exec( parser, session, out );
+            Continuation result = this.exec( parser, session, out );
             tx.success();
             return result;
         }
@@ -240,7 +242,7 @@ public abstract class GraphDatabaseApp extends AbstractApp
         return "OUTGOING, INCOMING, o, i";
     }
 
-    protected abstract String exec( AppCommandParser parser, Session session,
+    protected abstract Continuation exec( AppCommandParser parser, Session session,
         Output out ) throws Exception;
 
     protected void printPath( Path path, boolean quietPrint, Session session, Output out )
@@ -378,8 +380,7 @@ public abstract class GraphDatabaseApp extends AbstractApp
     protected static String findTitle( GraphDatabaseShellServer server,
         Session session, Node node )
     {
-        String keys = ( String ) safeGet( session,
-            AbstractClient.TITLE_KEYS_KEY );
+        String keys = ( String ) session.get( AbstractClient.TITLE_KEYS_KEY );
         if ( keys == null )
         {
             return null;
@@ -407,8 +408,7 @@ public abstract class GraphDatabaseApp extends AbstractApp
 
     private static String trimLength( Session session, String string )
     {
-        String maxLengthString = ( String )
-            safeGet( session, AbstractClient.TITLE_MAX_LENGTH );
+        String maxLengthString = ( String ) session.get( AbstractClient.TITLE_MAX_LENGTH );
         int maxLength = maxLengthString != null ?
             Integer.parseInt( maxLengthString ) : Integer.MAX_VALUE;
         if ( string.length() > maxLength )
@@ -611,7 +611,7 @@ public abstract class GraphDatabaseApp extends AbstractApp
             for ( String command : templateLines )
             {
                 String line = TextUtil.templateString( command, data );
-                server.interpretLine( line, session, out );
+                server.interpretLine( session.getId(), line, out );
             }
         }
         if ( newLineBetweenHits )
@@ -694,7 +694,7 @@ public abstract class GraphDatabaseApp extends AbstractApp
         return matches.isEmpty() ? null : matches;
     }
     
-    protected static RelationshipExpander toExpander( GraphDatabaseService db, Direction defaultDirection,
+    protected static PathExpander toExpander( GraphDatabaseService db, Direction defaultDirection,
             Map<String, Object> relationshipTypes, boolean caseInsensitiveFilters, boolean looseFilters ) throws ShellException
     {
         defaultDirection = defaultDirection != null ? defaultDirection : Direction.BOTH;
@@ -707,10 +707,10 @@ public abstract class GraphDatabaseApp extends AbstractApp
             expander = expander.add( DynamicRelationshipType.withName( entry.getKey() ),
                     entry.getValue() );
         }
-        return expander;
+        return (PathExpander) expander;
     }
     
-    protected static RelationshipExpander toSortedExpander( GraphDatabaseService db, Direction defaultDirection,
+    protected static PathExpander toSortedExpander( GraphDatabaseService db, Direction defaultDirection,
             Map<String, Object> relationshipTypes, boolean caseInsensitiveFilters, boolean looseFilters ) throws ShellException
     {
         defaultDirection = defaultDirection != null ? defaultDirection : Direction.BOTH;
@@ -722,19 +722,19 @@ public abstract class GraphDatabaseApp extends AbstractApp
             expander = expander.add( DynamicRelationshipType.withName( entry.getKey() ),
                     entry.getValue() );
         }
-        return expander;
+        return (PathExpander) expander;
     }
-
-    private static final RelationshipExpander EMPTY_EXPANDER = new RelationshipExpander()
+    
+    private static final PathExpander EMPTY_EXPANDER = new PathExpander()
     {
         @Override
-        public RelationshipExpander reversed()
+        public PathExpander reverse()
         {
             return this;
         }
         
         @Override
-        public Iterable<Relationship> expand( Node node )
+        public Iterable<Relationship> expand( Path path, BranchState state )
         {
             return Collections.emptyList();
         }
