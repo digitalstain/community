@@ -20,6 +20,7 @@
 package org.neo4j.index.impl.lucene;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.lucene.search.IndexSearcher;
@@ -38,6 +39,8 @@ class IndexSearcherRef
      * And when that client calls close() it should be closed.
      */
     private volatile boolean detached;
+
+    private final AtomicBoolean stale = new AtomicBoolean();
 
     public IndexSearcherRef( IndexIdentifier identifier, IndexSearcher searcher )
     {
@@ -113,5 +116,20 @@ class IndexSearcherRef
     synchronized boolean isClosed()
     {
         return isClosed;
+    }
+
+    synchronized boolean checkAndSetStale()
+    {
+        return stale.compareAndSet( true, false );
+    }
+
+    synchronized boolean isStale()
+    {
+        return stale.get();
+    }
+
+    public void setStale()
+    {
+        stale.set( true );
     }
 }
